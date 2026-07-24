@@ -27,9 +27,15 @@ public class CompletionHandlerTests
 
         var tag = new ComponentTypeInfo("Tag", "TagComponent", "TestGame.TagComponent", "class TagComponent : Component", null, [], null);
 
+        var light = new ComponentTypeInfo("PointLight", "PointLightComponent", "TestGame.PointLightComponent", "class PointLightComponent : Component", null,
+            [
+                new MemberInfo("falloff", "TestGame.FalloffMode", "FalloffMode Falloff;", null, null, null, ["Linear", "Quadratic", "InverseSquare"]),
+                new MemberInfo("castShadows", "bool", "bool CastShadows;", null, null, null, ["true", "false"]),
+            ], null);
+
         return new EngineSchema(
             new Dictionary<string, PrototypeTypeInfo>(StringComparer.OrdinalIgnoreCase) { ["entity"] = prototype },
-            new Dictionary<string, ComponentTypeInfo>(StringComparer.OrdinalIgnoreCase) { ["Tag"] = tag });
+            new Dictionary<string, ComponentTypeInfo>(StringComparer.OrdinalIgnoreCase) { ["Tag"] = tag, ["PointLight"] = light });
     }
 
     [Fact]
@@ -84,5 +90,25 @@ public class CompletionHandlerTests
 
         Assert.Contains(items, i => i.Label == "Base");
         Assert.DoesNotContain(items, i => i.Label == "Child");
+    }
+
+    [Fact]
+    public void Enum_typed_component_field_value_offers_its_member_names()
+    {
+        var text = "- type: entity\n  id: X\n  weight: 1\n  components:\n  - type: PointLight\n    falloff: \n";
+        var items = CompletionHandler.Handle(text, new LspPosition(5, 13), BuildSchema(), ResourceIndex.Empty).ToList();
+
+        var labels = items.Select(i => i.Label).ToList();
+        Assert.Equal(["Linear", "Quadratic", "InverseSquare"], labels);
+        Assert.All(items, i => Assert.Equal(OmniSharp.Extensions.LanguageServer.Protocol.Models.CompletionItemKind.EnumMember, i.Kind));
+    }
+
+    [Fact]
+    public void Bool_typed_component_field_value_offers_true_and_false()
+    {
+        var text = "- type: entity\n  id: X\n  weight: 1\n  components:\n  - type: PointLight\n    castShadows: \n";
+        var items = CompletionHandler.Handle(text, new LspPosition(5, 17), BuildSchema(), ResourceIndex.Empty).ToList();
+
+        Assert.Equal(["true", "false"], items.Select(i => i.Label));
     }
 }

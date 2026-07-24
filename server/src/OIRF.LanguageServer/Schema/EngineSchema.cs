@@ -39,16 +39,22 @@ public sealed record DataFieldInfo(
     string Signature,
     string? DocMarkdown,
     AssetClassification? Asset,
-    SymbolLocation? Location);
+    SymbolLocation? Location,
+    IReadOnlyList<string>? ValueChoices = null);
 
-/// <summary>A public settable member on a <see cref="ComponentTypeInfo"/>.</summary>
+/// <summary>
+/// A public settable member on a <see cref="ComponentTypeInfo"/>. <see cref="ValueChoices"/>
+/// (enum member names, or "true"/"false" for bool) is null for anything else, and offered as
+/// value completion the same way an asset-classified field offers resource keys.
+/// </summary>
 public sealed record MemberInfo(
     string Name,
     string ClrTypeDisplay,
     string Signature,
     string? DocMarkdown,
     AssetClassification? Asset,
-    SymbolLocation? Location);
+    SymbolLocation? Location,
+    IReadOnlyList<string>? ValueChoices = null);
 
 /// <summary>A <c>[Prototype("type")]</c> class implementing <c>IPrototype</c>.</summary>
 public sealed record PrototypeTypeInfo(

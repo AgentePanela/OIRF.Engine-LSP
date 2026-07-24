@@ -193,7 +193,15 @@ public static class LanguageServerHost
                     new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Textures/**" },
                     new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Shaders/**" }),
             })
-            .OnCompletion(onCompletion, (_, _) => new CompletionRegistrationOptions { DocumentSelector = PrototypeSelector })
+            .OnCompletion(onCompletion, (_, _) => new CompletionRegistrationOptions
+            {
+                DocumentSelector = PrototypeSelector,
+                // Beyond VSCode's default "typing a word character" auto-trigger: fires
+                // completion immediately after these too, since a lot of useful completion
+                // positions in this grammar sit right after one of them with no word char yet
+                // (a fresh "- " bullet, a value position right after "key: ").
+                TriggerCharacters = new Container<string>(" ", "-", ":"),
+            })
             .OnHover(onHover, (_, _) => new HoverRegistrationOptions { DocumentSelector = PrototypeSelector })
             .OnDefinition(onDefinition, (_, _) => new DefinitionRegistrationOptions { DocumentSelector = PrototypeSelector })
         );

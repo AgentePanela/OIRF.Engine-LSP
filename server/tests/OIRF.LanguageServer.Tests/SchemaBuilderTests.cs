@@ -160,12 +160,14 @@ public class SchemaBuilderTests
         Assert.True(schema.ComponentsByName.TryGetValue("Physics", out var component));
         Assert.Equal("TestGame.PhysicsComponent", component!.ClrTypeName);
 
-        var friction = Assert.Single(component.Members, m => m.Name == "Friction");
+        // Member names are exposed in camelCase (matching the engine's YAML convention, e.g.
+        // "friction: 15" in real prototype files), not the PascalCase C# property name.
+        var friction = Assert.Single(component.Members, m => m.Name == "friction");
         Assert.Equal("Linear drag applied every frame.", friction.DocMarkdown);
 
-        Assert.DoesNotContain(component.Members, m => m.Name == "Internal");
-        Assert.DoesNotContain(component.Members, m => m.Name == "Owner");
-        Assert.DoesNotContain(component.Members, m => m.Name == "Deleted");
+        Assert.DoesNotContain(component.Members, m => m.Name == "internal");
+        Assert.DoesNotContain(component.Members, m => m.Name == "owner");
+        Assert.DoesNotContain(component.Members, m => m.Name == "deleted");
     }
 
     [Fact]
@@ -194,7 +196,7 @@ public class SchemaBuilderTests
         var schema = await BuildSchemaAsync();
 
         Assert.True(schema.ComponentsByName.TryGetValue("PhysicsLike", out var component));
-        var friction = Assert.Single(component!.Members, m => m.Name == "Friction");
+        var friction = Assert.Single(component!.Members, m => m.Name == "friction");
 
         Assert.Equal("Linear drag applied every frame.", friction.DocMarkdown);
     }

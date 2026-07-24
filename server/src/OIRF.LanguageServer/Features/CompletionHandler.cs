@@ -35,12 +35,12 @@ public static class CompletionHandler
                     .Select(MemberItem)
                 : [],
 
-            NodeContext.TopLevelFieldValue ctx => AssetCompletion(
-                ResolvePrototype(schema, ctx.PrototypeTypeKey)?.DataFields.FirstOrDefault(f => string.Equals(f.YamlName, ctx.FieldName, StringComparison.OrdinalIgnoreCase))?.Asset,
+            NodeContext.TopLevelFieldValue ctx => ValueCompletion(
+                ResolvePrototype(schema, ctx.PrototypeTypeKey)?.DataFields.FirstOrDefault(f => string.Equals(f.YamlName, ctx.FieldName, StringComparison.OrdinalIgnoreCase)),
                 resources),
 
-            NodeContext.ComponentFieldValue ctx => AssetCompletion(
-                ResolveComponent(schema, ctx.ComponentName)?.Members.FirstOrDefault(m => string.Equals(m.Name, ctx.FieldName, StringComparison.OrdinalIgnoreCase))?.Asset,
+            NodeContext.ComponentFieldValue ctx => ValueCompletion(
+                ResolveComponent(schema, ctx.ComponentName)?.Members.FirstOrDefault(m => string.Equals(m.Name, ctx.FieldName, StringComparison.OrdinalIgnoreCase)),
                 resources),
 
             // Local-document scope only: siblings in the same file with the same prototype type,
@@ -102,6 +102,25 @@ public static class CompletionHandler
         Detail = m.ClrTypeDisplay,
         Documentation = ToMarkup(m.DocMarkdown),
     };
+
+    private static IEnumerable<CompletionItem> ValueCompletion(DataFieldInfo? field, ResourceIndex resources) =>
+        field is null ? [] : ValueCompletion(field.Asset, field.ValueChoices, resources);
+
+    private static IEnumerable<CompletionItem> ValueCompletion(MemberInfo? member, ResourceIndex resources) =>
+        member is null ? [] : ValueCompletion(member.Asset, member.ValueChoices, resources);
+
+    // A field's value is either an asset-path reference or a fixed set of literal choices
+    // (enum member names, "true"/"false" for bool) - never both, so no need to merge/dedupe.
+    private static IEnumerable<CompletionItem> ValueCompletion(AssetClassification? asset, IReadOnlyList<string>? choices, ResourceIndex resources)
+    {
+        if (asset is not null)
+            return AssetCompletion(asset, resources);
+
+        if (choices is not null)
+            return choices.Select(c => new CompletionItem { Label = c, Kind = CompletionItemKind.EnumMember });
+
+        return [];
+    }
 
     private static IEnumerable<CompletionItem> AssetCompletion(AssetClassification? asset, ResourceIndex resources)
     {

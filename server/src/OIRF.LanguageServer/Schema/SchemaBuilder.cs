@@ -142,7 +142,8 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
                 BuildMemberSignature(member),
                 doc,
                 asset,
-                GetLocation(member)));
+                GetLocation(member),
+                memberType is not null ? GetValueChoices(memberType) : null));
         }
 
         var info = new PrototypeTypeInfo(typeKey, loadPriority, symbol.ToDisplayString(), classSignature, isInheriting, classDoc, dataFields, classLocation);
@@ -203,7 +204,8 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
                 BuildMemberSignature(member),
                 doc,
                 asset,
-                GetLocation(member)));
+                GetLocation(member),
+                memberType is not null ? GetValueChoices(memberType) : null));
         }
 
         var info = new ComponentTypeInfo(name, symbol.Name, symbol.ToDisplayString(), classSignature, classDoc, members, classLocation);
@@ -282,6 +284,32 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
             IFieldSymbol f => $"{accessibility}{f.Type.ToDisplayString(ShortTypeFormat)} {f.Name};",
             _ => member.ToDisplayString(),
         };
+    }
+
+    /// <summary>
+    /// The valid literal values for a field's value-completion, if the field's type is an enum
+    /// (member names) or bool ("true"/"false") - unwraps a nullable wrapper first, since
+    /// <c>FalloffMode?</c> should offer the same choices as <c>FalloffMode</c>.
+    /// </summary>
+    private static IReadOnlyList<string>? GetValueChoices(ITypeSymbol type)
+    {
+        var target = type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable
+            ? nullable.TypeArguments[0]
+            : type;
+
+        if (target.SpecialType == SpecialType.System_Boolean)
+            return ["true", "false"];
+
+        if (target.TypeKind != TypeKind.Enum)
+            return null;
+
+        var values = target.GetMembers()
+            .OfType<IFieldSymbol>()
+            .Where(f => f.HasConstantValue)
+            .Select(f => f.Name)
+            .ToList();
+
+        return values.Count > 0 ? values : null;
     }
 
     private static SymbolLocation? GetLocation(ISymbol symbol)
