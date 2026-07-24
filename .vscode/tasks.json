@@ -4,9 +4,11 @@
     {
       "type": "npm",
       "script": "compile",
+      "path": "client",
       "group": "build",
       "problemMatcher": ["$tsc"],
-      "label": "npm: compile"
+      "label": "npm: compile",
+      "options": { "cwd": "${workspaceFolder}/client" }
     }
   ]
 }

@@ -6,10 +6,10 @@
       "type": "extensionHost",
       "request": "launch",
       "args": [
-        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=${workspaceFolder}/client",
         "c:\\Users\\agent\\Documents\\Project-Eptus"
       ],
-      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "outFiles": ["${workspaceFolder}/client/dist/**/*.js"],
       "preLaunchTask": "npm: compile"
     }
   ]

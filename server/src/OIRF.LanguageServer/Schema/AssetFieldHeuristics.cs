@@ -3,10 +3,13 @@ using Microsoft.CodeAnalysis;
 namespace OIRF.LanguageServer.Schema;
 
 /// <summary>
-/// Classifies a field/member as an asset-path reference. Two of these are the engine's own
-/// dedicated wrapper types (high confidence); everything else falls back to a name-keyword
-/// heuristic on plain `string` fields, since not every asset-path field is consistently typed
-/// (e.g. `TilePrototype.Sprite` is a plain string, not a `SpriteKey`).
+/// Classifies a field/member as an asset-path reference. Highest confidence: the engine's own
+/// dedicated wrapper types (<c>SpriteKey</c>/<c>ShaderPath</c>) or an explicit marker attribute
+/// (<c>Engine.Shared.Assets.TextureKeyAttribute</c>/<c>AnimationKeyAttribute</c>/
+/// <c>ShaderKeyAttribute</c>) on a plain `string` field - the deterministic alternative to
+/// name-guessing for fields that can't use a dedicated wrapper type directly (e.g.
+/// <c>TilePrototype.Sprite</c>, <c>AnimationComponent.Key</c>). Anything else falls back to a
+/// low-confidence name-keyword heuristic, since not every asset-path field is marked yet.
 ///
 /// This table is intentionally NOT a reflection of Engine.Editor's IQuickResolveField/
 /// QuickResolveRegistry - not every downstream solution includes the Editor project - so keep
@@ -16,20 +19,19 @@ public static class AssetFieldHeuristics
 {
     private const string SpriteKeyFqn = "Engine.Client.Assets.SpriteKey";
     private const string ShaderPathFqn = "Engine.Client.Graphics.Shaders.ShaderPath";
+    private const string TextureKeyAttributeFqn = "Engine.Shared.Assets.TextureKeyAttribute";
+    private const string AnimationKeyAttributeFqn = "Engine.Shared.Assets.AnimationKeyAttribute";
+    private const string ShaderKeyAttributeFqn = "Engine.Shared.Assets.ShaderKeyAttribute";
 
-    private static readonly (string Keyword, AssetKind Kind)[] NameKeywords =
-    [
-        ("sprite", AssetKind.Sprite),
-        ("texture", AssetKind.Sprite),
-        ("icon", AssetKind.Sprite),
-        ("shader", AssetKind.Shader),
-    ];
-
+    /// <param name="member">
+    /// The field/property symbol itself, so an explicit marker attribute can be checked directly
+    /// (attributes live on the member, not its type).
+    /// </param>
     /// <param name="containingTypeDisplayName">
     /// The declaring type's full display name (e.g. "Engine.Client.Graphics.AnimationComponent").
     /// Used only for the low-confidence "Key"-named field fallback below.
     /// </param>
-    public static AssetClassification? Classify(ITypeSymbol type, string fieldName, string containingTypeDisplayName)
+    public static AssetClassification? Classify(ISymbol member, ITypeSymbol type, string fieldName, string containingTypeDisplayName)
     {
         var typeName = type.ToDisplayString();
 
@@ -42,19 +44,25 @@ public static class AssetFieldHeuristics
         if (type.SpecialType != SpecialType.System_String)
             return null;
 
-        foreach (var (keyword, kind) in NameKeywords)
-        {
-            if (fieldName.Contains(keyword, StringComparison.OrdinalIgnoreCase))
-            {
-                var roots = kind == AssetKind.Sprite ? new[] { "Textures" } : new[] { "Shaders" };
-                return new AssetClassification(kind, roots, HighConfidence: false);
-            }
-        }
+        var attributeFqns = member.GetAttributes()
+            .Select(a => a.AttributeClass?.ToDisplayString())
+            .ToHashSet();
 
-        // AnimationComponent.Key is a plain string named just "Key" - too generic a name to
-        // match on its own, but combined with "the declaring type looks like an animation
-        // component" it's a safe, narrow signal (confirmed against the engine's own
-        // AnimationComponent.Key, which references info.yml animation ids, not atlas frame keys).
+        if (attributeFqns.Contains(TextureKeyAttributeFqn))
+            return new AssetClassification(AssetKind.Sprite, ["Textures"], HighConfidence: true);
+
+        if (attributeFqns.Contains(AnimationKeyAttributeFqn))
+            return new AssetClassification(AssetKind.Animation, ["Textures"], HighConfidence: true);
+
+        if (attributeFqns.Contains(ShaderKeyAttributeFqn))
+            return new AssetClassification(AssetKind.Shader, ["Shaders"], HighConfidence: true);
+
+        if (fieldName.Contains("shader", StringComparison.OrdinalIgnoreCase))
+            return new AssetClassification(AssetKind.Shader, ["Shaders"], HighConfidence: false);
+
+        // Fallback for a downstream Animation-like component that doesn't use [AnimationKey]:
+        // a plain string named just "Key" is too generic to match on its own, but combined with
+        // "the declaring type looks like an animation component" it's a safe, narrow signal.
         if (string.Equals(fieldName, "Key", StringComparison.OrdinalIgnoreCase) &&
             containingTypeDisplayName.Contains("Animation", StringComparison.OrdinalIgnoreCase))
         {

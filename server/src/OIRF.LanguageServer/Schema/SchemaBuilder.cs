@@ -128,7 +128,7 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
             var memberType = GetMemberType(member);
             var doc = XmlDocToMarkdown.Convert(member, compilation);
             var asset = memberType is not null
-                ? AssetFieldHeuristics.Classify(memberType, yamlName, symbol.ToDisplayString())
+                ? AssetFieldHeuristics.Classify(member, memberType, yamlName, symbol.ToDisplayString())
                 : null;
 
             dataFields.Add(new DataFieldInfo(
@@ -188,7 +188,7 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
             var memberType = GetMemberType(member);
             var doc = XmlDocToMarkdown.Convert(member, compilation);
             var asset = memberType is not null
-                ? AssetFieldHeuristics.Classify(memberType, member.Name, symbol.ToDisplayString())
+                ? AssetFieldHeuristics.Classify(member, memberType, member.Name, symbol.ToDisplayString())
                 : null;
 
             members.Add(new MemberInfo(member.Name, memberType?.ToDisplayString() ?? "object", doc, asset));
