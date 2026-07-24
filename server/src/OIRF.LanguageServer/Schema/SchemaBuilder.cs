@@ -120,7 +120,7 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
             if (dataFieldAttr is null)
                 continue;
 
-            var yamlName = GetCtorArg<string>(dataFieldAttr, 0) ?? member.Name;
+            var yamlName = GetCtorArg<string>(dataFieldAttr, 0) ?? ToCamelCase(member.Name);
             if (!seenNames.Add(yamlName))
                 continue; // a more-derived override already supplied this field
 
@@ -198,7 +198,7 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
                 : null;
 
             members.Add(new MemberInfo(
-                member.Name,
+                ToCamelCase(member.Name),
                 memberType?.ToDisplayString() ?? "object",
                 BuildMemberSignature(member),
                 doc,
@@ -206,7 +206,7 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
                 GetLocation(member)));
         }
 
-        var info = new ComponentTypeInfo(name, symbol.ToDisplayString(), classSignature, classDoc, members, classLocation);
+        var info = new ComponentTypeInfo(name, symbol.Name, symbol.ToDisplayString(), classSignature, classDoc, members, classLocation);
 
         if (!components.TryAdd(name, info))
         {
@@ -324,5 +324,16 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
         }
 
         return false;
+    }
+
+    private static string ToCamelCase(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return name;
+
+        if (name.Length == 1)
+            return char.ToLowerInvariant(name[0]).ToString();
+
+        return char.ToLowerInvariant(name[0]) + name[1..];
     }
 }

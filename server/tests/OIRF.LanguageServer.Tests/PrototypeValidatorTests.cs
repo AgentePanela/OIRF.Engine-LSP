@@ -23,7 +23,7 @@ public class PrototypeValidatorTests
         };
         var prototype = new PrototypeTypeInfo("entity", 0, "TestGame.EntityPrototype", "class EntityPrototype", true, null, dataFields, null);
 
-        var physics = new ComponentTypeInfo("Physics", "TestGame.PhysicsComponent", "class PhysicsComponent : Component", null,
+        var physics = new ComponentTypeInfo("Physics", "PhysicsComponent", "TestGame.PhysicsComponent", "class PhysicsComponent : Component", null,
             [new MemberInfo("Friction", "float", "float Friction;", null, null, null)], null);
 
         return new EngineSchema(
@@ -93,6 +93,20 @@ public class PrototypeValidatorTests
         var diagnostic = Assert.Single(diagnostics);
         Assert.Equal(DiagnosticSeverity.Error, diagnostic.Severity);
         Assert.Contains("does not contain field/property 'frictoin'", diagnostic.Message);
+    }
+
+    [Fact]
+    public void Component_referenced_by_class_name_is_warning_not_error()
+    {
+        // The engine's own loader (EntityManager.Entity.cs) tries the registered name first,
+        // then falls back to the raw C# class name - so "PhysicsComponent" (not just "Physics")
+        // is valid YAML, just not the convention.
+        var text = "- type: entity\n  id: X\n  weight: 1\n  components:\n  - type: PhysicsComponent\n";
+        var diagnostics = PrototypeValidator.Validate(text, BuildSchema()).ToList();
+
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal(DiagnosticSeverity.Warning, diagnostic.Severity);
+        Assert.Contains("registered name 'Physics'", diagnostic.Message);
     }
 
     [Fact]

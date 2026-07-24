@@ -64,11 +64,18 @@ public sealed record PrototypeTypeInfo(
 /// <summary>A <c>[RegisterComponent("Name")]</c> class deriving from <c>Component</c>.</summary>
 public sealed record ComponentTypeInfo(
     string Name,
+    string ClassName,
     string ClrTypeName,
     string Signature,
     string? ClassDocMarkdown,
     IReadOnlyList<MemberInfo> Members,
     SymbolLocation? Location);
+
+/// <summary>
+/// The result of resolving a <c>type:</c> value against a component's registered
+/// <see cref="ComponentTypeInfo.Name"/> or, failing that, its raw <see cref="ComponentTypeInfo.ClassName"/>.
+/// </summary>
+public sealed record ComponentResolution(ComponentTypeInfo Component, bool MatchedByClassName);
 
 /// <summary>
 /// Everything the LSP features (completion/hover/diagnostics) need to know about the prototypes
@@ -84,11 +91,58 @@ public sealed class EngineSchema
     public IReadOnlyDictionary<string, PrototypeTypeInfo> PrototypesByTypeKey { get; }
     public IReadOnlyDictionary<string, ComponentTypeInfo> ComponentsByName { get; }
 
+    /// <summary>
+    /// Keyed by raw C# class name (e.g. "PointLightComponent"), not the registered name (e.g.
+    /// "PointLight"). The engine's own loader accepts either
+    /// (<c>EntityManager.Entity.cs</c>: <c>ComponentFactory.CreateInstanceFromSanitized(name) ??
+    /// CreateInstance(name)</c>, where <c>CreateInstanceFromSanitized</c> looks up the registered
+    /// name and the fallback <c>CreateInstance</c> looks up the raw class name) - so a prototype
+    /// referencing a component by its class name is valid YAML, not an error, even though the
+    /// registered name is the convention. See <see cref="ResolveComponent"/>.
+    /// </summary>
+    public IReadOnlyDictionary<string, ComponentTypeInfo> ComponentsByClassName { get; }
+
     public EngineSchema(
         IReadOnlyDictionary<string, PrototypeTypeInfo> prototypesByTypeKey,
         IReadOnlyDictionary<string, ComponentTypeInfo> componentsByName)
+        : this(prototypesByTypeKey, componentsByName, BuildByClassName(componentsByName))
+    {
+    }
+
+    public EngineSchema(
+        IReadOnlyDictionary<string, PrototypeTypeInfo> prototypesByTypeKey,
+        IReadOnlyDictionary<string, ComponentTypeInfo> componentsByName,
+        IReadOnlyDictionary<string, ComponentTypeInfo> componentsByClassName)
     {
         PrototypesByTypeKey = prototypesByTypeKey;
         ComponentsByName = componentsByName;
+        ComponentsByClassName = componentsByClassName;
+    }
+
+    /// <summary>
+    /// Resolves a component <c>type:</c> value the same way the engine's runtime loader does:
+    /// registered name first, raw class name as a fallback. Callers that need to distinguish the
+    /// two (the validator, to warn on the fallback path) can check
+    /// <see cref="ComponentResolution.MatchedByClassName"/>.
+    /// </summary>
+    public ComponentResolution? ResolveComponent(string name)
+    {
+        if (ComponentsByName.TryGetValue(name, out var byRegisteredName))
+            return new ComponentResolution(byRegisteredName, MatchedByClassName: false);
+
+        if (ComponentsByClassName.TryGetValue(name, out var byClassName))
+            return new ComponentResolution(byClassName, MatchedByClassName: true);
+
+        return null;
+    }
+
+    private static IReadOnlyDictionary<string, ComponentTypeInfo> BuildByClassName(
+        IReadOnlyDictionary<string, ComponentTypeInfo> componentsByName)
+    {
+        var byClassName = new Dictionary<string, ComponentTypeInfo>(StringComparer.OrdinalIgnoreCase);
+        foreach (var component in componentsByName.Values)
+            byClassName.TryAdd(component.ClassName, component);
+
+        return byClassName;
     }
 }

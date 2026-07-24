@@ -33,6 +33,13 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
     /// <summary>Raised after every schema rebuild, so already-open documents can be re-validated.</summary>
     public event Action? SchemaChanged;
 
+    /// <summary>
+    /// Raised right before a schema rebuild begins (initial load, or a debounced rescan after a
+    /// .cs save) - lets the client-facing status notification show "indexing" promptly instead
+    /// of only ever reporting after-the-fact.
+    /// </summary>
+    public event Action? SchemaRebuildStarted;
+
     public async Task InitializeAsync(IReadOnlyList<string> workspaceRoots, CancellationToken cancellationToken)
     {
         _workspaceRoots = workspaceRoots;
@@ -68,6 +75,8 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
 
     private async Task RebuildSchemaAsync(CancellationToken cancellationToken)
     {
+        SchemaRebuildStarted?.Invoke();
+
         try
         {
             Schema = await _schemaBuilder.BuildAsync(_roslynHost.EngineRelevantProjects, cancellationToken);

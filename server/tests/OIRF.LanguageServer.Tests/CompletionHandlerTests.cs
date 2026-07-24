@@ -25,7 +25,7 @@ public class CompletionHandlerTests
         };
         var prototype = new PrototypeTypeInfo("entity", 0, "TestGame.EntityPrototype", "class EntityPrototype", true, null, dataFields, null);
 
-        var tag = new ComponentTypeInfo("Tag", "TestGame.TagComponent", "class TagComponent : Component", null, [], null);
+        var tag = new ComponentTypeInfo("Tag", "TagComponent", "TestGame.TagComponent", "class TagComponent : Component", null, [], null);
 
         return new EngineSchema(
             new Dictionary<string, PrototypeTypeInfo>(StringComparer.OrdinalIgnoreCase) { ["entity"] = prototype },

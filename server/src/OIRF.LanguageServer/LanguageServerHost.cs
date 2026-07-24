@@ -29,6 +29,24 @@ public static class LanguageServerHost
         var documentStore = new OpenDocumentStore();
         EngineWorkspaceManager? manager = null;
         ITextDocumentLanguageServer? textDocument = null;
+        ILanguageServer? languageServer = null;
+
+        // Client-facing status (see client/src/extension.ts's status bar item) - not part of the
+        // LSP spec, just a plain custom notification. "indexing" fires both for the initial
+        // workspace load and for every debounced rescan triggered by a .cs save.
+        void PublishIndexing() =>
+            languageServer?.SendNotification("oirf/status", new StatusParams("indexing", 0, 0));
+
+        void PublishReadyStatus()
+        {
+            if (manager is null)
+                return;
+
+            var state = manager.IsEngineWorkspace ? "ready" : "notEngineWorkspace";
+            languageServer?.SendNotification(
+                "oirf/status",
+                new StatusParams(state, manager.Schema.PrototypesByTypeKey.Count, manager.Schema.ComponentsByName.Count));
+        }
 
         void ValidateAndPublish(DocumentUri uri, string text)
         {
@@ -138,11 +156,15 @@ public static class LanguageServerHost
             .OnInitialize(async (server, request, token) =>
             {
                 textDocument = server.TextDocument;
+                languageServer = server;
 
                 var roots = GetWorkspaceRoots(request);
                 manager = new EngineWorkspaceManager(loggerFactory);
                 manager.SchemaChanged += RevalidateAllOpenDocuments;
+                manager.SchemaChanged += PublishReadyStatus;
+                manager.SchemaRebuildStarted += PublishIndexing;
 
+                PublishIndexing();
                 await manager.InitializeAsync(roots, token);
             })
             .OnInitialized((server, _, _, _) =>
@@ -178,6 +200,9 @@ public static class LanguageServerHost
 
         await server.WaitForExit;
     }
+
+    /// <summary>Payload for the custom "oirf/status" notification - see client/src/extension.ts.</summary>
+    private sealed record StatusParams(string State, int PrototypeCount, int ComponentCount);
 
     private static List<string> GetWorkspaceRoots(InitializeParams request)
     {

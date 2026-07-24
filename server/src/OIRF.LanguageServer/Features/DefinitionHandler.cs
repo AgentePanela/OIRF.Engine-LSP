@@ -23,7 +23,7 @@ public static class DefinitionHandler
                 schema.PrototypesByTypeKey.GetValueOrDefault(ctx.CurrentValue)?.Location,
 
             NodeContext.ComponentTypeValue ctx when ctx.CurrentValue is not null =>
-                schema.ComponentsByName.GetValueOrDefault(ctx.CurrentValue)?.Location,
+                schema.ResolveComponent(ctx.CurrentValue)?.Component.Location,
 
             NodeContext.TopLevelFieldValue ctx =>
                 schema.PrototypesByTypeKey.GetValueOrDefault(ctx.PrototypeTypeKey)
@@ -31,8 +31,8 @@ public static class DefinitionHandler
                     ?.Location,
 
             NodeContext.ComponentFieldValue ctx =>
-                schema.ComponentsByName.GetValueOrDefault(ctx.ComponentName)
-                    ?.Members.FirstOrDefault(m => string.Equals(m.Name, ctx.FieldName, StringComparison.OrdinalIgnoreCase))
+                schema.ResolveComponent(ctx.ComponentName)?.Component
+                    .Members.FirstOrDefault(m => string.Equals(m.Name, ctx.FieldName, StringComparison.OrdinalIgnoreCase))
                     ?.Location,
 
             _ => null,

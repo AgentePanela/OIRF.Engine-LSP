@@ -169,6 +169,26 @@ public class SchemaBuilderTests
     }
 
     [Fact]
+    public async Task Resolves_component_by_registered_name_and_by_class_name_fallback()
+    {
+        // Mirrors the engine's own loader: ComponentFactory.CreateInstanceFromSanitized(name)
+        // (registered name) ?? CreateInstance(name) (raw class name) - so both must resolve, but
+        // only the registered-name path should be reported as the non-fallback match.
+        var schema = await BuildSchemaAsync();
+
+        var byRegisteredName = schema.ResolveComponent("Physics");
+        Assert.NotNull(byRegisteredName);
+        Assert.False(byRegisteredName!.MatchedByClassName);
+
+        var byClassName = schema.ResolveComponent("PhysicsComponent");
+        Assert.NotNull(byClassName);
+        Assert.True(byClassName!.MatchedByClassName);
+        Assert.Same(byRegisteredName!.Component, byClassName!.Component);
+
+        Assert.Null(schema.ResolveComponent("NotAComponent"));
+    }
+
+    [Fact]
     public async Task Resolves_inheritdoc_cref_across_types()
     {
         var schema = await BuildSchemaAsync();

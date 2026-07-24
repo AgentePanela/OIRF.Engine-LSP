@@ -10,10 +10,41 @@ import { resolveServerPath } from "./serverPath";
 
 let client: LanguageClient | undefined;
 let outputChannel: vscode.OutputChannel;
+let statusBarItem: vscode.StatusBarItem;
+
+interface StatusParams {
+  state: "indexing" | "ready" | "notEngineWorkspace";
+  prototypeCount: number;
+  componentCount: number;
+}
+
+function renderStatus(status: StatusParams): void {
+  switch (status.state) {
+    case "indexing":
+      statusBarItem.text = "$(sync~spin) OIRF Engine";
+      statusBarItem.tooltip = "OIRF Engine LSP: indexing the workspace (prototypes/components)...";
+      break;
+    case "ready":
+      statusBarItem.text = `$(check) OIRF Engine`;
+      statusBarItem.tooltip =
+        `OIRF Engine LSP: ready — ${status.prototypeCount} prototype type(s), ` +
+        `${status.componentCount} component type(s).`;
+      break;
+    case "notEngineWorkspace":
+      statusBarItem.text = "$(circle-slash) OIRF Engine";
+      statusBarItem.tooltip = "OIRF Engine LSP: this workspace doesn't look like an OIRF/Eptus engine project.";
+      break;
+  }
+  statusBarItem.show();
+}
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel("OIRF Engine LSP");
   context.subscriptions.push(outputChannel);
+
+  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+  statusBarItem.command = "oirf-engine-lsp.restartServer";
+  context.subscriptions.push(statusBarItem);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("oirf-engine-lsp.forceActivate", async () => {
@@ -93,6 +124,9 @@ async function startServer(context: vscode.ExtensionContext): Promise<void> {
     clientOptions
   );
 
+  renderStatus({ state: "indexing", prototypeCount: 0, componentCount: 0 });
+  client.onNotification("oirf/status", (status: StatusParams) => renderStatus(status));
+
   await client.start();
   outputChannel.appendLine("Server started.");
 }
@@ -103,6 +137,7 @@ async function stopServer(): Promise<void> {
   }
   const toStop = client;
   client = undefined;
+  statusBarItem.hide();
   await toStop.stop();
 }
 

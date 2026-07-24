@@ -23,15 +23,15 @@ public static class HoverHandler
                 RenderType(schema.PrototypesByTypeKey.GetValueOrDefault(ctx.CurrentValue), yamlKey: ctx.CurrentValue),
 
             NodeContext.ComponentTypeValue ctx when ctx.CurrentValue is not null =>
-                RenderType(schema.ComponentsByName.GetValueOrDefault(ctx.CurrentValue), yamlKey: ctx.CurrentValue),
+                RenderType(schema.ResolveComponent(ctx.CurrentValue)?.Component, yamlKey: ctx.CurrentValue),
 
             NodeContext.TopLevelFieldValue ctx =>
                 RenderField(schema.PrototypesByTypeKey.GetValueOrDefault(ctx.PrototypeTypeKey)
                     ?.DataFields.FirstOrDefault(f => string.Equals(f.YamlName, ctx.FieldName, StringComparison.OrdinalIgnoreCase))),
 
             NodeContext.ComponentFieldValue ctx =>
-                RenderField(schema.ComponentsByName.GetValueOrDefault(ctx.ComponentName)
-                    ?.Members.FirstOrDefault(m => string.Equals(m.Name, ctx.FieldName, StringComparison.OrdinalIgnoreCase))),
+                RenderField(schema.ResolveComponent(ctx.ComponentName)?.Component
+                    .Members.FirstOrDefault(m => string.Equals(m.Name, ctx.FieldName, StringComparison.OrdinalIgnoreCase))),
 
             _ => null,
         };
@@ -50,8 +50,8 @@ public static class HoverHandler
         if (proto is null)
             return null;
 
-        var badge = $"(`{yamlKey}`)";
-        return Compose(proto.Signature, badge, proto.ClassDocMarkdown);
+        //var badge = $"(`{yamlKey}`)";
+        return Compose(proto.Signature, null, proto.ClassDocMarkdown);
     }
 
     private static string? RenderType(ComponentTypeInfo? component, string yamlKey)
@@ -59,8 +59,8 @@ public static class HoverHandler
         if (component is null)
             return null;
 
-        var badge = $"(`{yamlKey}`)";
-        return Compose(component.Signature, badge, component.ClassDocMarkdown);
+        //var badge = $"(`{yamlKey}`)";
+        return Compose(component.Signature, null, component.ClassDocMarkdown);
     }
 
     private static string? RenderField(DataFieldInfo? field)
@@ -68,7 +68,7 @@ public static class HoverHandler
         if (field is null)
             return null;
 
-        var badge = field.Required ? "\n*(required)*" : null;
+        var badge = field.Required ? "*(required)*" : null;
         return Compose(field.Signature, badge, field.DocMarkdown);
     }
 
@@ -86,7 +86,7 @@ public static class HoverHandler
         sb.Append("```csharp\n").Append(signature).Append("\n```");
 
         if (badge is not null)
-            sb.Append(' ').Append(badge);
+            sb.Append('\n').Append(badge);
 
         if (docMarkdown is not null)
             sb.Append("\n\n---\n\n").Append(docMarkdown);

@@ -36,16 +36,16 @@ public static class PrototypeValidator
     {
         if (item.TypeValue is null || item.TypeValueRange is null)
         {
-            yield return Error(item.ItemRange, "missing-required-field", "Prototype item is missing a 'type:' key.");
+            yield return Error(item.ItemRange, "missing-req-field", "Prototype item is missing a 'type:' key.");
             yield break;
         }
 
         if (string.IsNullOrEmpty(item.IdValue))
-            yield return Error(item.ItemRange, "missing-required-field", "Prototype item is missing an 'id:' key.");
+            yield return Error(item.ItemRange, "missing-req-field", "Prototype item is missing an 'id:' key.");
 
         if (!schema.PrototypesByTypeKey.TryGetValue(item.TypeValue, out var proto))
         {
-            yield return Error(item.TypeValueRange, "unknown-prototype-type", $"Unknown prototype type '{item.TypeValue}'.");
+            yield return Error(item.TypeValueRange, "unknown-proto-type", $"Unknown prototype type '{item.TypeValue}'.");
             yield break;
         }
 
@@ -66,7 +66,7 @@ public static class PrototypeValidator
                 {
                     yield return Error(
                         item.ItemRange,
-                        "missing-required-field",
+                        "missing-req-field",
                         $"Missing required field '{field.YamlName}' on prototype '{item.IdValue}'.");
                 }
             }
@@ -76,7 +76,7 @@ public static class PrototypeValidator
         {
             var known = proto.DataFields.Any(f => string.Equals(f.YamlName, field.Name, StringComparison.OrdinalIgnoreCase));
             if (!known)
-                yield return Warning(field.KeyRange, "unknown-prototype-field", $"Unknown field '{field.Name}' on prototype '{item.IdValue}'.");
+                yield return Warning(field.KeyRange, "unknown-proto-field", $"Unknown field '{field.Name}' on prototype '{item.IdValue}'.");
         }
 
         foreach (var component in item.Components)
@@ -94,11 +94,25 @@ public static class PrototypeValidator
             yield break;
         }
 
-        if (!schema.ComponentsByName.TryGetValue(component.TypeValue, out var comp))
+        var resolution = schema.ResolveComponent(component.TypeValue);
+        if (resolution is null)
         {
             yield return Error(component.TypeValueRange, "unknown-component", $"Unknown component type '{component.TypeValue}'.");
             yield break;
         }
+
+        if (resolution.MatchedByClassName)
+        {
+            // Valid (the engine's loader falls back to the raw class name - see
+            // EngineSchema.ComponentsByClassName), but not the convention - nudge toward the
+            // registered name without blocking the user.
+            yield return Warning(
+                component.TypeValueRange,
+                "comp-ref-by-class-name",
+                $"'{component.TypeValue}' is the component class name. Consider using the registered name '{resolution.Component.Name}' instead.");
+        }
+
+        var comp = resolution.Component;
 
         foreach (var field in component.Fields)
         {
@@ -107,7 +121,7 @@ public static class PrototypeValidator
             {
                 yield return Error(
                     field.KeyRange,
-                    "unknown-component-field",
+                    "unknown-comp-field",
                     $"Component '{component.TypeValue}' does not contain field/property '{field.Name}'.");
             }
         }

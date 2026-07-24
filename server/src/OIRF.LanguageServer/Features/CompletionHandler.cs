@@ -65,7 +65,7 @@ public static class CompletionHandler
         schema.PrototypesByTypeKey.GetValueOrDefault(typeKey);
 
     private static ComponentTypeInfo? ResolveComponent(EngineSchema schema, string name) =>
-        schema.ComponentsByName.GetValueOrDefault(name);
+        schema.ResolveComponent(name)?.Component;
 
     private static CompletionItem PrototypeTypeItem(PrototypeTypeInfo p) => new()
     {
