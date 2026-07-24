@@ -1,8 +1,8 @@
 {
   "name": "oirf-engine-lsp",
-  "displayName": "OIRF Engine Prototype IntelliSense",
-  "description": "IntelliSense (completion, hover docs, diagnostics, asset-path completion) for OIRF/Eptus engine Prototype YAML files.",
-  "version": "0.1.0",
+  "displayName": "OIRF.Engine LSP",
+  "description": "OIRF.Engine Language Server Protocol - A VSCode extension desgined to help editing resources at a OIRF.Engine project.",
+  "version": "0.3.0",
   "publisher": "oirf",
   "private": true,
   "engines": {
@@ -22,15 +22,15 @@
     "commands": [
       {
         "command": "oirf-engine-lsp.forceActivate",
-        "title": "OIRF Engine LSP: Force Activate"
+        "title": "OIRF.Engine LSP: Force Activate"
       },
       {
         "command": "oirf-engine-lsp.restartServer",
-        "title": "OIRF Engine LSP: Restart Server"
+        "title": "OIRF.Engine LSP: Restart Server"
       }
     ],
     "configuration": {
-      "title": "OIRF Engine LSP",
+      "title": "OIRF.Engine LSP",
       "properties": {
         "oirfEngineLsp.trace.server": {
           "type": "string",

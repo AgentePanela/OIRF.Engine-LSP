@@ -16,8 +16,14 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
     private readonly SchemaBuilder _schemaBuilder = new(loggerFactory.CreateLogger<SchemaBuilder>());
 
     private IReadOnlyList<string> _workspaceRoots = [];
+    private EngineWorkspaceLocator.EntryPoint _entryPoint = new(null, []);
     private DebouncedRescanQueue? _csharpRescanQueue;
     private DebouncedRescanQueue? _resourceRescanQueue;
+
+    // Paths accumulated between debounce firings, so the eventual rescan knows exactly which
+    // files to try to refresh incrementally instead of always paying for a full solution reload.
+    private readonly HashSet<string> _pendingChangedCSharpFiles = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _pendingChangedFilesGate = new();
 
     public EngineSchema Schema { get; private set; } = EngineSchema.Empty;
 
@@ -50,10 +56,11 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
             if (entryPoint.IsEmpty)
                 continue;
 
-            await _roslynHost.LoadAsync(entryPoint, cancellationToken);
             // First workspace folder with a usable .sln/.csproj wins for M1; aggregating a true
             // multi-root workspace across several distinct solutions is a fast-follow, not
-            // needed for the single-repo scenarios this milestone targets.
+            // needed for the single-repo scenarios this milestone targets. Actually loading it
+            // happens inside RebuildSchemaAsync (see there for why), which runs right below.
+            _entryPoint = entryPoint;
             break;
         }
 
@@ -69,7 +76,13 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
         });
     }
 
-    public void NotifyCSharpFileChanged() => _csharpRescanQueue?.Trigger();
+    public void NotifyCSharpFileChanged(string filePath)
+    {
+        lock (_pendingChangedFilesGate)
+            _pendingChangedCSharpFiles.Add(filePath);
+
+        _csharpRescanQueue?.Trigger();
+    }
 
     public void NotifyResourceFileChanged() => _resourceRescanQueue?.Trigger();
 
@@ -77,8 +90,25 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
     {
         SchemaRebuildStarted?.Invoke();
 
+        string[] changedFiles;
+        lock (_pendingChangedFilesGate)
+        {
+            changedFiles = [.. _pendingChangedCSharpFiles];
+            _pendingChangedCSharpFiles.Clear();
+        }
+
         try
         {
+            // Fast path: swap just the changed file(s)' text into the tracked Solution snapshot
+            // (cheap, in-memory, no MSBuild re-evaluation) - covers the common case of editing an
+            // existing [Prototype]/[RegisterComponent] class. Falls back to a full reopen when
+            // there's nothing to diff against yet (the very first, startup call - changedFiles is
+            // empty then) or when any changed file isn't part of the current solution at all
+            // (most commonly a brand new file, which genuinely needs MSBuild to notice it).
+            var refreshedIncrementally = changedFiles.Length > 0 && changedFiles.All(_roslynHost.TryRefreshDocument);
+            if (!refreshedIncrementally)
+                await _roslynHost.LoadAsync(_entryPoint, cancellationToken);
+
             Schema = await _schemaBuilder.BuildAsync(_roslynHost.EngineRelevantProjects, cancellationToken);
         }
         catch (Exception ex)

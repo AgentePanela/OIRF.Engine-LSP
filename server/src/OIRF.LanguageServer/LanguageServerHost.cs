@@ -112,7 +112,7 @@ public static class LanguageServerHost
             {
                 var path = change.Uri.GetFileSystemPath();
                 if (path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
-                    manager?.NotifyCSharpFileChanged();
+                    manager?.NotifyCSharpFileChanged(path);
                 else
                     manager?.NotifyResourceFileChanged();
             }
