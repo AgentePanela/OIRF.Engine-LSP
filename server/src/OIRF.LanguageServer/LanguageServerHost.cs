@@ -121,6 +121,14 @@ public static class LanguageServerHost
             return Task.FromResult<Hover?>(null);
         };
 
+        Func<DefinitionParams, CancellationToken, Task<LocationOrLocationLinks?>> onDefinition = (request, _) =>
+        {
+            if (manager is { IsEngineWorkspace: true } && documentStore.TryGet(request.TextDocument.Uri, out var text))
+                return Task.FromResult(DefinitionHandler.Handle(text, request.Position, manager.Schema));
+
+            return Task.FromResult<LocationOrLocationLinks?>(null);
+        };
+
         var server = await OmniSharp.Extensions.LanguageServer.Server.LanguageServer.From(options => options
             .WithInput(Console.OpenStandardInput())
             .WithOutput(Console.OpenStandardOutput())
@@ -165,6 +173,7 @@ public static class LanguageServerHost
             })
             .OnCompletion(onCompletion, (_, _) => new CompletionRegistrationOptions { DocumentSelector = PrototypeSelector })
             .OnHover(onHover, (_, _) => new HoverRegistrationOptions { DocumentSelector = PrototypeSelector })
+            .OnDefinition(onDefinition, (_, _) => new DefinitionRegistrationOptions { DocumentSelector = PrototypeSelector })
         );
 
         await server.WaitForExit;

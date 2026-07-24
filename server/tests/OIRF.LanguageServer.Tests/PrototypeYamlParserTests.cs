@@ -92,6 +92,66 @@ public class PrototypeYamlParserTests
         Assert.Equal("friction", fieldContext.FieldName);
     }
 
+    // Line 0: "- type: entity"
+    // Line 1: "  id: MobPlayer"
+    // Line 2: "  components:"
+    // Line 3: "  - type: Tag"
+    // Line 4: "  " (blank line being actively typed, no field yet)
+    private const string TrailingBlankLineSample =
+        "- type: entity\n" +
+        "  id: MobPlayer\n" +
+        "  components:\n" +
+        "  - type: Tag\n" +
+        "  ";
+
+    [Fact]
+    public void Resolves_component_field_key_on_a_blank_line_after_the_last_component_field()
+    {
+        // Regression test: the "true end" of a component with only "type: Tag" is the end of the
+        // "Tag" scalar itself - a blank line typed immediately after must still resolve to field
+        // completion for that component, not fall through to "no context" or back to "which
+        // component type" (see NodeContextResolver's bounded-by-next-sibling containment).
+        var document = PrototypeYamlParser.Parse(TrailingBlankLineSample);
+
+        var context = NodeContextResolver.Resolve(document, new LspPosition(4, 2));
+
+        var fieldKeyContext = Assert.IsType<NodeContext.ComponentFieldKey>(context);
+        Assert.Equal("Tag", fieldKeyContext.ComponentName);
+    }
+
+    [Fact]
+    public void Resolves_top_level_field_key_on_a_trailing_blank_line_at_end_of_file()
+    {
+        const string sample = "- type: entity\n  id: MobPlayer\n  ";
+        var document = PrototypeYamlParser.Parse(sample);
+
+        var context = NodeContextResolver.Resolve(document, new LspPosition(2, 2));
+
+        Assert.IsType<NodeContext.TopLevelFieldKey>(context);
+    }
+
+    [Fact]
+    public void Resolves_component_type_value_for_a_fresh_bullet_with_no_type_key_yet()
+    {
+        const string sample = "- type: entity\n  id: MobPlayer\n  components:\n  - \n";
+        var document = PrototypeYamlParser.Parse(sample);
+
+        var context = NodeContextResolver.Resolve(document, new LspPosition(3, 4));
+
+        var componentContext = Assert.IsType<NodeContext.ComponentTypeValue>(context);
+        Assert.Null(componentContext.CurrentValue);
+    }
+
+    [Fact]
+    public void Parent_field_is_tracked_as_present_once_written()
+    {
+        const string sample = "- type: entity\n  id: MobPlayer\n  parent: Base\n";
+        var document = PrototypeYamlParser.Parse(sample);
+        var item = Assert.Single(document.Items);
+
+        Assert.Contains(item.TopLevelFields, f => f.Name == "parent");
+    }
+
     [Fact]
     public void Reports_syntax_error_for_malformed_yaml()
     {

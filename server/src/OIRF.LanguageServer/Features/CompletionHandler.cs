@@ -16,13 +16,18 @@ public static class CompletionHandler
         {
             NodeContext.PrototypeTypeValue => schema.PrototypesByTypeKey.Values.Select(PrototypeTypeItem),
 
+            // "type"/"id" are excluded: they're structural (always the first two lines, and
+            // completed via their own dedicated value-completion path), not generic authorable
+            // fields. "parent"/"abstract" ARE meta (skipped by the required-field check, see
+            // SchemaBuilder.MetaFieldNames) but are still fields the user types like any other,
+            // so they must stay in this list.
             NodeContext.TopLevelFieldKey ctx => ResolvePrototype(schema, ctx.PrototypeTypeKey) is { } proto
                 ? proto.DataFields
-                    .Where(f => !f.IsMeta && !ctx.ExistingFieldNames.Contains(f.YamlName))
+                    .Where(f => !IsStructuralKey(f.YamlName) && !ctx.ExistingFieldNames.Contains(f.YamlName))
                     .Select(DataFieldItem)
                 : [],
 
-            NodeContext.ComponentTypeValue => schema.ComponentsByName.Values.Select(ComponentTypeItem),
+            NodeContext.ComponentTypeValue ctx => schema.ComponentsByName.Values.Select(c => ComponentTypeItem(c, needsTypeKeyPrefix: ctx.CurrentValue is null)),
 
             NodeContext.ComponentFieldKey ctx => ResolveComponent(schema, ctx.ComponentName) is { } comp
                 ? comp.Members
@@ -38,9 +43,23 @@ public static class CompletionHandler
                 ResolveComponent(schema, ctx.ComponentName)?.Members.FirstOrDefault(m => string.Equals(m.Name, ctx.FieldName, StringComparison.OrdinalIgnoreCase))?.Asset,
                 resources),
 
+            // Local-document scope only: siblings in the same file with the same prototype type,
+            // excluding the item being edited. Cross-file parent lookup would need a workspace-wide
+            // id index, which doesn't exist yet - a fast-follow, not needed for this to be useful.
+            NodeContext.ParentValue ctx => document.Items
+                .Where(i => string.Equals(i.TypeValue, ctx.PrototypeTypeKey, StringComparison.OrdinalIgnoreCase))
+                .Select(i => i.IdValue)
+                .Where(id => id is { Length: > 0 } && !string.Equals(id, ctx.CurrentItemId, StringComparison.Ordinal))
+                .Distinct()
+                .Select(id => new CompletionItem { Label = id!, Kind = CompletionItemKind.Reference }),
+
             _ => [],
         };
     }
+
+    private static bool IsStructuralKey(string yamlName) =>
+        string.Equals(yamlName, "type", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(yamlName, "id", StringComparison.OrdinalIgnoreCase);
 
     private static PrototypeTypeInfo? ResolvePrototype(EngineSchema schema, string typeKey) =>
         schema.PrototypesByTypeKey.GetValueOrDefault(typeKey);
@@ -56,9 +75,13 @@ public static class CompletionHandler
         Documentation = ToMarkup(p.ClassDocMarkdown),
     };
 
-    private static CompletionItem ComponentTypeItem(ComponentTypeInfo c) => new()
+    private static CompletionItem ComponentTypeItem(ComponentTypeInfo c, bool needsTypeKeyPrefix) => new()
     {
         Label = c.Name,
+        // A fresh "- " bullet has no "type:" key on it yet, so accepting a bare component name
+        // would insert invalid YAML ("- Tag" instead of "- type: Tag"). Once a "type:" key
+        // already exists and the cursor is in its value, only the bare name is needed.
+        InsertText = needsTypeKeyPrefix ? $"type: {c.Name}" : c.Name,
         Kind = CompletionItemKind.Class,
         Detail = c.ClrTypeName,
         Documentation = ToMarkup(c.ClassDocMarkdown),

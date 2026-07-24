@@ -4,6 +4,12 @@ using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 
 namespace OIRF.LanguageServer.Features;
 
+/// <summary>
+/// Renders hovers as a ```csharp fenced signature block followed by the doc body - matching how
+/// the C# extension's own hover looks (VSCode colorizes fenced code blocks using the target
+/// language's grammar, so this gets semantic-looking coloring for free without a semantic tokens
+/// provider for the YAML side).
+/// </summary>
 public static class HoverHandler
 {
     public static Hover? Handle(string text, LspPosition position, EngineSchema schema)
@@ -14,10 +20,10 @@ public static class HoverHandler
         var markdown = context switch
         {
             NodeContext.PrototypeTypeValue ctx when ctx.CurrentValue is not null =>
-                RenderType(schema.PrototypesByTypeKey.GetValueOrDefault(ctx.CurrentValue)),
+                RenderType(schema.PrototypesByTypeKey.GetValueOrDefault(ctx.CurrentValue), yamlKey: ctx.CurrentValue),
 
             NodeContext.ComponentTypeValue ctx when ctx.CurrentValue is not null =>
-                RenderType(schema.ComponentsByName.GetValueOrDefault(ctx.CurrentValue)),
+                RenderType(schema.ComponentsByName.GetValueOrDefault(ctx.CurrentValue), yamlKey: ctx.CurrentValue),
 
             NodeContext.TopLevelFieldValue ctx =>
                 RenderField(schema.PrototypesByTypeKey.GetValueOrDefault(ctx.PrototypeTypeKey)
@@ -39,22 +45,22 @@ public static class HoverHandler
         };
     }
 
-    private static string? RenderType(PrototypeTypeInfo? proto)
+    private static string? RenderType(PrototypeTypeInfo? proto, string yamlKey)
     {
         if (proto is null)
             return null;
 
-        var header = $"**{proto.TypeKey}** — `{proto.ClrTypeName}`";
-        return proto.ClassDocMarkdown is null ? header : $"{header}\n\n{proto.ClassDocMarkdown}";
+        var badge = $"(`{yamlKey}`)";
+        return Compose(proto.Signature, badge, proto.ClassDocMarkdown);
     }
 
-    private static string? RenderType(ComponentTypeInfo? component)
+    private static string? RenderType(ComponentTypeInfo? component, string yamlKey)
     {
         if (component is null)
             return null;
 
-        var header = $"**{component.Name}** — `{component.ClrTypeName}`";
-        return component.ClassDocMarkdown is null ? header : $"{header}\n\n{component.ClassDocMarkdown}";
+        var badge = $"(`{yamlKey}`)";
+        return Compose(component.Signature, badge, component.ClassDocMarkdown);
     }
 
     private static string? RenderField(DataFieldInfo? field)
@@ -62,9 +68,8 @@ public static class HoverHandler
         if (field is null)
             return null;
 
-        var badge = field.Required ? " *(required)*" : string.Empty;
-        var header = $"**{field.YamlName}**: `{field.ClrTypeDisplay}`{badge}";
-        return field.DocMarkdown is null ? header : $"{header}\n\n{field.DocMarkdown}";
+        var badge = field.Required ? "\n*(required)*" : null;
+        return Compose(field.Signature, badge, field.DocMarkdown);
     }
 
     private static string? RenderField(MemberInfo? member)
@@ -72,7 +77,20 @@ public static class HoverHandler
         if (member is null)
             return null;
 
-        var header = $"**{member.Name}**: `{member.ClrTypeDisplay}`";
-        return member.DocMarkdown is null ? header : $"{header}\n\n{member.DocMarkdown}";
+        return Compose(member.Signature, badge: null, member.DocMarkdown);
+    }
+
+    private static string Compose(string signature, string? badge, string? docMarkdown)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("```csharp\n").Append(signature).Append("\n```");
+
+        if (badge is not null)
+            sb.Append(' ').Append(badge);
+
+        if (docMarkdown is not null)
+            sb.Append("\n\n---\n\n").Append(docMarkdown);
+
+        return sb.ToString();
     }
 }

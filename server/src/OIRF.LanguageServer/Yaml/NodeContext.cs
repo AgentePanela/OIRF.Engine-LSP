@@ -9,7 +9,7 @@ public abstract record NodeContext
 
     public sealed record PrototypeIdValue : NodeContext;
 
-    public sealed record ParentValue : NodeContext;
+    public sealed record ParentValue(string PrototypeTypeKey, string? CurrentItemId) : NodeContext;
 
     public sealed record TopLevelFieldKey(string PrototypeTypeKey, IReadOnlySet<string> ExistingFieldNames) : NodeContext;
 

@@ -85,13 +85,31 @@ public static class PrototypeYamlParser
                     continue;
                 case "parent":
                     parentValueRange = valueRange;
+                    // Also tracked as a regular top-level field (in addition to the dedicated
+                    // ParentValueRange used for hover/completion-value context) purely so
+                    // "already present" checks - e.g. excluding it from key completion once
+                    // written - see it like any other field.
+                    topLevelFields.Add(new FieldSpan
+                    {
+                        Name = key,
+                        KeyRange = keyRange,
+                        ValueRange = valueRange,
+                        ScalarValue = (valueNode as YamlScalarNode)?.Value,
+                    });
                     continue;
                 case "components" when valueNode is YamlSequenceNode componentsSeq:
                     componentsListRange = YamlPositionMapper.ToRange(componentsSeq.Start, GetTrueEnd(componentsSeq));
                     foreach (var componentNode in componentsSeq.Children)
                     {
-                        if (componentNode is YamlMappingNode componentMapping)
-                            components.Add(ParseComponent(componentMapping));
+                        // Every sequence child gets an entry, even a bare "- " bullet with
+                        // nothing on it yet (not a YamlMappingNode) - otherwise that bullet has
+                        // no ComponentItem of its own, and position-lookup would fall back to
+                        // whichever real component happens to precede it, misresolving a
+                        // still-empty bullet in the *middle* of the list as if it were inside
+                        // that earlier component.
+                        components.Add(componentNode is YamlMappingNode componentMapping
+                            ? ParseComponent(componentMapping)
+                            : EmptyComponent(componentNode));
                     }
                     continue;
             }
@@ -161,6 +179,15 @@ public static class PrototypeYamlParser
             Fields = fields,
         };
     }
+
+    private static ComponentItem EmptyComponent(YamlNode node) => new()
+    {
+        ItemRange = YamlPositionMapper.ToRange(node.Start, GetTrueEnd(node)),
+        TypeValue = null,
+        TypeKeyRange = null,
+        TypeValueRange = null,
+        Fields = [],
+    };
 
     /// <summary>
     /// YamlDotNet reports <c>Start</c> correctly for block mappings/sequences, but <c>End</c> is

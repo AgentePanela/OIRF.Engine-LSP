@@ -15,16 +15,16 @@ public class PrototypeValidatorTests
     {
         var dataFields = new List<DataFieldInfo>
         {
-            new("type", Required: false, IsMeta: true, IsComponentsField: false, ClrTypeDisplay: "string", DocMarkdown: null, Asset: null),
-            new("id", Required: false, IsMeta: true, IsComponentsField: false, ClrTypeDisplay: "string", DocMarkdown: null, Asset: null),
-            new("parent", Required: false, IsMeta: true, IsComponentsField: false, ClrTypeDisplay: "string", DocMarkdown: null, Asset: null),
-            new("weight", Required: true, IsMeta: false, IsComponentsField: false, ClrTypeDisplay: "float", DocMarkdown: null, Asset: null),
-            new("components", Required: false, IsMeta: false, IsComponentsField: true, ClrTypeDisplay: "List<ComponentEntry>", DocMarkdown: null, Asset: null),
+            new("type", Required: false, IsMeta: true, IsComponentsField: false, ClrTypeDisplay: "string", Signature: "string Type;", DocMarkdown: null, Asset: null, Location: null),
+            new("id", Required: false, IsMeta: true, IsComponentsField: false, ClrTypeDisplay: "string", Signature: "string Id;", DocMarkdown: null, Asset: null, Location: null),
+            new("parent", Required: false, IsMeta: true, IsComponentsField: false, ClrTypeDisplay: "string", Signature: "string Parent;", DocMarkdown: null, Asset: null, Location: null),
+            new("weight", Required: true, IsMeta: false, IsComponentsField: false, ClrTypeDisplay: "float", Signature: "float Weight;", DocMarkdown: null, Asset: null, Location: null),
+            new("components", Required: false, IsMeta: false, IsComponentsField: true, ClrTypeDisplay: "List<ComponentEntry>", Signature: "List<ComponentEntry> Components;", DocMarkdown: null, Asset: null, Location: null),
         };
-        var prototype = new PrototypeTypeInfo("entity", 0, "TestGame.EntityPrototype", true, null, dataFields);
+        var prototype = new PrototypeTypeInfo("entity", 0, "TestGame.EntityPrototype", "class EntityPrototype", true, null, dataFields, null);
 
-        var physics = new ComponentTypeInfo("Physics", "TestGame.PhysicsComponent", null,
-            [new MemberInfo("Friction", "float", null, null)]);
+        var physics = new ComponentTypeInfo("Physics", "TestGame.PhysicsComponent", "class PhysicsComponent : Component", null,
+            [new MemberInfo("Friction", "float", "float Friction;", null, null, null)], null);
 
         return new EngineSchema(
             new Dictionary<string, PrototypeTypeInfo>(StringComparer.OrdinalIgnoreCase) { ["entity"] = prototype },

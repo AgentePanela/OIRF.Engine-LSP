@@ -108,6 +108,8 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
         var loadPriority = GetCtorArg<int?>(prototypeAttr, 1) ?? 0;
         var isInheriting = ImplementsInterface(symbol, IInheritingPrototypeFqn);
         var classDoc = XmlDocToMarkdown.Convert(symbol, compilation);
+        var classSignature = BuildTypeSignature(symbol);
+        var classLocation = GetLocation(symbol);
 
         var dataFields = new List<DataFieldInfo>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -137,11 +139,13 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
                 isMeta,
                 isComponentsField,
                 memberType?.ToDisplayString() ?? "object",
+                BuildMemberSignature(member),
                 doc,
-                asset));
+                asset,
+                GetLocation(member)));
         }
 
-        var info = new PrototypeTypeInfo(typeKey, loadPriority, symbol.ToDisplayString(), isInheriting, classDoc, dataFields);
+        var info = new PrototypeTypeInfo(typeKey, loadPriority, symbol.ToDisplayString(), classSignature, isInheriting, classDoc, dataFields, classLocation);
 
         if (!prototypes.TryAdd(typeKey, info))
         {
@@ -167,6 +171,8 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
             return;
 
         var classDoc = XmlDocToMarkdown.Convert(symbol, compilation);
+        var classSignature = BuildTypeSignature(symbol);
+        var classLocation = GetLocation(symbol);
 
         var members = new List<MemberInfo>();
         var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -191,10 +197,16 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
                 ? AssetFieldHeuristics.Classify(member, memberType, member.Name, symbol.ToDisplayString())
                 : null;
 
-            members.Add(new MemberInfo(member.Name, memberType?.ToDisplayString() ?? "object", doc, asset));
+            members.Add(new MemberInfo(
+                member.Name,
+                memberType?.ToDisplayString() ?? "object",
+                BuildMemberSignature(member),
+                doc,
+                asset,
+                GetLocation(member)));
         }
 
-        var info = new ComponentTypeInfo(name, symbol.ToDisplayString(), classDoc, members);
+        var info = new ComponentTypeInfo(name, symbol.ToDisplayString(), classSignature, classDoc, members, classLocation);
 
         if (!components.TryAdd(name, info))
         {
@@ -229,6 +241,65 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
         IFieldSymbol f => f.Type,
         _ => null,
     };
+
+    private static readonly SymbolDisplayFormat ShortTypeFormat = SymbolDisplayFormat.MinimallyQualifiedFormat;
+
+    /// <summary>
+    /// A short, human/C#-looking one-line declaration for a hover code block - not a real
+    /// round-trippable signature (no attributes, no full generic constraints), just enough for
+    /// the hover to render like the C# extension's does via a ```csharp fenced block.
+    /// </summary>
+    private static string BuildTypeSignature(INamedTypeSymbol symbol)
+    {
+        var keyword = symbol.TypeKind switch
+        {
+            TypeKind.Interface => "interface",
+            TypeKind.Struct => symbol.IsRecord ? "record struct" : "struct",
+            _ => symbol.IsRecord ? "record" : "class",
+        };
+
+        var modifiers = new List<string> { "public" };
+        if (symbol.IsSealed && symbol.TypeKind == TypeKind.Class)
+            modifiers.Add("sealed");
+        modifiers.Add(keyword);
+
+        var baseList = new List<string>();
+        if (symbol.BaseType is { SpecialType: not SpecialType.System_Object } baseType)
+            baseList.Add(baseType.Name);
+        baseList.AddRange(symbol.Interfaces.Select(i => i.Name));
+
+        var baseClause = baseList.Count > 0 ? " : " + string.Join(", ", baseList) : string.Empty;
+        return $"{string.Join(' ', modifiers)} {symbol.Name}{baseClause}";
+    }
+
+    private static string BuildMemberSignature(ISymbol member)
+    {
+        var accessibility = member.DeclaredAccessibility == Accessibility.Public ? "public " : string.Empty;
+
+        return member switch
+        {
+            IPropertySymbol p => $"{accessibility}{p.Type.ToDisplayString(ShortTypeFormat)} {p.Name} {{ get;{(p.SetMethod is not null ? " set;" : string.Empty)} }}",
+            IFieldSymbol f => $"{accessibility}{f.Type.ToDisplayString(ShortTypeFormat)} {f.Name};",
+            _ => member.ToDisplayString(),
+        };
+    }
+
+    private static SymbolLocation? GetLocation(ISymbol symbol)
+    {
+        var location = symbol.Locations.FirstOrDefault(l => l.IsInSource);
+        if (location is null)
+            return null;
+
+        var span = location.GetLineSpan();
+        if (!span.IsValid)
+            return null;
+
+        return new SymbolLocation(
+            span.Path,
+            new LspRange(
+                new LspPosition(span.StartLinePosition.Line, span.StartLinePosition.Character),
+                new LspPosition(span.EndLinePosition.Line, span.EndLinePosition.Character)));
+    }
 
     private static AttributeData? FindAttribute(ISymbol symbol, string attributeFqn) =>
         symbol.GetAttributes().FirstOrDefault(a => a.AttributeClass?.ToDisplayString() == attributeFqn);

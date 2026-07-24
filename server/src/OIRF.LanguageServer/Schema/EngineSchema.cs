@@ -21,6 +21,14 @@ public enum AssetKind
 /// </summary>
 public sealed record AssetClassification(AssetKind Kind, IReadOnlyList<string> ResourceRoots, bool HighConfidence);
 
+/// <summary>
+/// Where a symbol is declared in C# source - captured once at schema-build time (via
+/// <c>ISymbol.Locations</c>/<c>GetLineSpan()</c>) rather than keeping the <c>ISymbol</c> itself
+/// around, since the schema is meant to be a plain snapshot decoupled from the Roslyn
+/// workspace's lifetime. Powers go-to-definition.
+/// </summary>
+public sealed record SymbolLocation(string FilePath, LspRange Range);
+
 /// <summary>A <c>[DataField]</c> member on a <see cref="PrototypeTypeInfo"/>.</summary>
 public sealed record DataFieldInfo(
     string YamlName,
@@ -28,31 +36,39 @@ public sealed record DataFieldInfo(
     bool IsMeta,
     bool IsComponentsField,
     string ClrTypeDisplay,
+    string Signature,
     string? DocMarkdown,
-    AssetClassification? Asset);
+    AssetClassification? Asset,
+    SymbolLocation? Location);
 
 /// <summary>A public settable member on a <see cref="ComponentTypeInfo"/>.</summary>
 public sealed record MemberInfo(
     string Name,
     string ClrTypeDisplay,
+    string Signature,
     string? DocMarkdown,
-    AssetClassification? Asset);
+    AssetClassification? Asset,
+    SymbolLocation? Location);
 
 /// <summary>A <c>[Prototype("type")]</c> class implementing <c>IPrototype</c>.</summary>
 public sealed record PrototypeTypeInfo(
     string TypeKey,
     int LoadPriority,
     string ClrTypeName,
+    string Signature,
     bool IsInheriting,
     string? ClassDocMarkdown,
-    IReadOnlyList<DataFieldInfo> DataFields);
+    IReadOnlyList<DataFieldInfo> DataFields,
+    SymbolLocation? Location);
 
 /// <summary>A <c>[RegisterComponent("Name")]</c> class deriving from <c>Component</c>.</summary>
 public sealed record ComponentTypeInfo(
     string Name,
     string ClrTypeName,
+    string Signature,
     string? ClassDocMarkdown,
-    IReadOnlyList<MemberInfo> Members);
+    IReadOnlyList<MemberInfo> Members,
+    SymbolLocation? Location);
 
 /// <summary>
 /// Everything the LSP features (completion/hover/diagnostics) need to know about the prototypes
