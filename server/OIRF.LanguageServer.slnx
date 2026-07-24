@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OIRF.LanguageServer/OIRF.LanguageServer.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OIRF.LanguageServer.Tests/OIRF.LanguageServer.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,64 @@
+{
+  "name": "oirf-engine-lsp",
+  "displayName": "OIRF Engine Prototype IntelliSense",
+  "description": "IntelliSense (completion, hover docs, diagnostics, asset-path completion) for OIRF/Eptus engine Prototype YAML files.",
+  "version": "0.1.0",
+  "publisher": "oirf",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "workspaceContains:**/Prototypes/**/*.yml",
+    "workspaceContains:**/Prototypes/**/*.yaml",
+    "workspaceContains:**/.gitmodules"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "oirf-engine-lsp.forceActivate",
+        "title": "OIRF Engine LSP: Force Activate"
+      },
+      {
+        "command": "oirf-engine-lsp.restartServer",
+        "title": "OIRF Engine LSP: Restart Server"
+      }
+    ],
+    "configuration": {
+      "title": "OIRF Engine LSP",
+      "properties": {
+        "oirfEngineLsp.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VSCode and the OIRF Engine language server."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
+    "vscode:prepublish": "npm run package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.3"
+  }
+}

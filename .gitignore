@@ -1,0 +1,19 @@
+# .NET
+bin/
+obj/
+*.user
+
+# Node
+node_modules/
+client/dist/
+client/out/
+
+# VSCode extension package
+*.vsix
+
+# IDE
+.vs/
+
+# OS
+.DS_Store
+Thumbs.db
