@@ -39,8 +39,8 @@ public sealed class RoslynWorkspaceHost(ILogger<RoslynWorkspaceHost> logger) : I
 
         _workspace?.Dispose();
         var workspace = MSBuildWorkspace.Create();
-        workspace.WorkspaceFailed += (_, e) =>
-            logger.LogWarning("MSBuild workspace diagnostic ({Kind}): {Message}", e.Diagnostic.Kind, e.Diagnostic.Message);
+        workspace.RegisterWorkspaceFailedHandler(e =>
+            logger.LogWarning("MSBuild workspace diagnostic ({Kind}): {Message}", e.Diagnostic.Kind, e.Diagnostic.Message));
         _workspace = workspace;
 
         try
