@@ -45,6 +45,6 @@ export function resolveServerPath(context: vscode.ExtensionContext): string {
   throw new Error(
     `OIRF Engine LSP: could not find the language server executable. Looked in:\n` +
       [bundled, ...devCandidates].join("\n") +
-      `\nBuild the server first: dotnet build server/OIRF.LanguageServer.sln`
+      `\nBuild the server first: dotnet build server/OIRF.LanguageServer.slnx`
   );
 }

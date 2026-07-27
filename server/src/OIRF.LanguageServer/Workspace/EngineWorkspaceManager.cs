@@ -56,7 +56,7 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
             if (entryPoint.IsEmpty)
                 continue;
 
-            // First workspace folder with a usable .sln/.csproj wins for M1; aggregating a true
+            // First workspace folder with a usable .sln/.slnx/.csproj wins for M1; aggregating a true
             // multi-root workspace across several distinct solutions is a fast-follow, not
             // needed for the single-repo scenarios this milestone targets. Actually loading it
             // happens inside RebuildSchemaAsync (see there for why), which runs right below.

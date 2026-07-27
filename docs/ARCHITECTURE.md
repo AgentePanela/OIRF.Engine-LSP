@@ -11,7 +11,7 @@ Two pieces:
   stdio via `OmniSharp.Extensions.LanguageServer`.
 
 The server is deliberately where all the intelligence lives. It opens the workspace's own
-`.sln`/`.csproj` with Roslyn (`Microsoft.CodeAnalysis.MSBuild`) and reads `[Prototype]` /
+`.sln`/`.slnx`/`.csproj` with Roslyn (`Microsoft.CodeAnalysis.MSBuild`) and reads `[Prototype]` /
 `[RegisterComponent]` / `[DataField]` types straight from source — the engine's own built-in
 types and any custom ones a downstream game project defines, indistinguishably, since both come
 from the same semantic-model walk. No build step, no separate schema-export tool: editing a
@@ -32,7 +32,7 @@ server/src/OIRF.LanguageServer/
    ├─ Program.cs                         -- MSBuildLocator.RegisterDefaults() FIRST
    ├─ LanguageServerHost.cs              -- OmniSharp LSP wiring, all handler registration
    ├─ Workspace/
-   │    ├─ EngineWorkspaceLocator.cs     -- finds the right .sln/.csproj to open
+   │    ├─ EngineWorkspaceLocator.cs     -- finds the right .sln/.slnx/.csproj to open
    │    ├─ RoslynWorkspaceHost.cs        -- owns MSBuildWorkspace, engine-relevant projects
    │    ├─ EngineWorkspaceManager.cs     -- orchestrator: schema + resource index + rescans
    │    └─ DebouncedRescanQueue.cs
@@ -98,7 +98,7 @@ Client-side (`workspaceDetection.ts`), before spawning the server at all:
 | Signal | Weight |
 |---|---|
 | any `**/Prototypes/**/*.{yml,yaml}` exists | +2 |
-| a `.sln`/`.csproj` references `Engine.Shared`/`Engine.Client`/`Engine.Server` | +2 |
+| a `.sln`/`.slnx`/`.csproj` references `Engine.Shared`/`Engine.Client`/`Engine.Server` | +2 |
 | `.gitmodules` references `OIRF.Engine` | +1 |
 | a sampled `.cs` file uses `Engine.Shared.Prototypes`/`[RegisterComponent(`/`[DataField(` | +1 |
 

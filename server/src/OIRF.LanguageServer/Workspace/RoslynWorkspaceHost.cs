@@ -33,7 +33,7 @@ public sealed class RoslynWorkspaceHost(ILogger<RoslynWorkspaceHost> logger) : I
     {
         if (entryPoint.IsEmpty)
         {
-            logger.LogInformation("No .sln/.csproj found for this workspace folder; Roslyn workspace not loaded.");
+            logger.LogInformation("No .sln/.slnx/.csproj found for this workspace folder; Roslyn workspace not loaded.");
             return false;
         }
 
