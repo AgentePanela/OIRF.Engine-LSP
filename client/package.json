@@ -2,7 +2,7 @@
   "name": "oirf-engine-lsp",
   "displayName": "OIRF.Engine LSP",
   "description": "OIRF.Engine Language Server Protocol - A VSCode extension desgined to help editing resources at a OIRF.Engine project.",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "publisher": "AgentePanela",
   "repository": {"url": "https://github.com/AgentePanela/OIRF.Engine-LSP"},
   "icon": "icon.png",
