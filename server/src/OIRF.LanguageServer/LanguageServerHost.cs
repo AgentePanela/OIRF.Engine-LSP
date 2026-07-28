@@ -128,7 +128,7 @@ public static class LanguageServerHost
                 if (path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
                     manager?.NotifyCSharpFileChanged(path);
                 else
-                    manager?.NotifyResourceFileChanged();
+                    manager?.NotifyWorkspaceFileChanged();
             }
 
             return Task.CompletedTask;
@@ -141,7 +141,7 @@ public static class LanguageServerHost
                 var path = request.TextDocument.Uri.GetFileSystemPath();
                 var items = IsInfoYaml(path)
                     ? InfoYamlCompletionHandler.Handle(text, request.Position, Path.GetDirectoryName(path)!).ToList()
-                    : CompletionHandler.Handle(text, request.Position, manager.Schema, manager.Resources).ToList();
+                    : CompletionHandler.Handle(text, request.Position, manager.Schema, manager.Resources, manager.PrototypeIds).ToList();
                 return Task.FromResult(new CompletionList(items));
             }
 
@@ -208,7 +208,10 @@ public static class LanguageServerHost
                 Watchers = new Container<OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher>(
                     new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/*.cs" },
                     new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Textures/**" },
-                    new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Shaders/**" }),
+                    new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Shaders/**" },
+                    // Feeds PrototypeIdIndex (see EngineWorkspaceManager) so ProtoId<T> completion
+                    // sees ids authored in files that aren't the one currently open.
+                    new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Prototypes/**" }),
             })
             .OnCompletion(onCompletion, (_, _) => new CompletionRegistrationOptions
             {

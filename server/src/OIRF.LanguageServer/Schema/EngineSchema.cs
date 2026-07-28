@@ -22,6 +22,17 @@ public enum AssetKind
 public sealed record AssetClassification(AssetKind Kind, IReadOnlyList<string> ResourceRoots, bool HighConfidence);
 
 /// <summary>
+/// A field/member's classification as a <c>ProtoId&lt;T&gt;</c>-shaped prototype-id reference
+/// (bare, nullable, or as a collection/array element - see AssetFieldHeuristics.ClassifyProtoId).
+/// Only <c>T</c>'s CLR type name is captured here rather than its registered
+/// <see cref="PrototypeTypeInfo.TypeKey"/>: schema-build time walks types in no particular order,
+/// so <c>T</c>'s own <c>[Prototype]</c> registration may not have been discovered yet. Resolving
+/// <see cref="PrototypeClrTypeName"/> to a <c>TypeKey</c> - and from there to actual prototype id:
+/// values via a workspace-wide id index - happens later, at completion time.
+/// </summary>
+public sealed record ProtoIdClassification(string PrototypeClrTypeName);
+
+/// <summary>
 /// Where a symbol is declared in C# source - captured once at schema-build time (via
 /// <c>ISymbol.Locations</c>/<c>GetLineSpan()</c>) rather than keeping the <c>ISymbol</c> itself
 /// around, since the schema is meant to be a plain snapshot decoupled from the Roslyn
@@ -40,7 +51,8 @@ public sealed record DataFieldInfo(
     string? DocMarkdown,
     AssetClassification? Asset,
     SymbolLocation? Location,
-    IReadOnlyList<string>? ValueChoices = null);
+    IReadOnlyList<string>? ValueChoices = null,
+    ProtoIdClassification? ProtoId = null);
 
 /// <summary>
 /// A public settable member on a <see cref="ComponentTypeInfo"/>. <see cref="ValueChoices"/>
@@ -54,7 +66,8 @@ public sealed record MemberInfo(
     string? DocMarkdown,
     AssetClassification? Asset,
     SymbolLocation? Location,
-    IReadOnlyList<string>? ValueChoices = null);
+    IReadOnlyList<string>? ValueChoices = null,
+    ProtoIdClassification? ProtoId = null);
 
 /// <summary>A <c>[Prototype("type")]</c> class implementing <c>IPrototype</c>.</summary>
 public sealed record PrototypeTypeInfo(

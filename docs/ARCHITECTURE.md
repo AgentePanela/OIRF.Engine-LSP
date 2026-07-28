@@ -34,24 +34,27 @@ server/src/OIRF.LanguageServer/
    ├─ Workspace/
    │    ├─ EngineWorkspaceLocator.cs     -- finds the right .sln/.slnx/.csproj to open
    │    ├─ RoslynWorkspaceHost.cs        -- owns MSBuildWorkspace, engine-relevant projects
-   │    ├─ EngineWorkspaceManager.cs     -- orchestrator: schema + resource index + rescans
+   │    ├─ EngineWorkspaceManager.cs     -- orchestrator: schema + resource/prototype-id index + rescans
    │    └─ DebouncedRescanQueue.cs
    ├─ Schema/
    │    ├─ SchemaBuilder.cs              -- the Roslyn walk: [Prototype]/[RegisterComponent] → EngineSchema
    │    ├─ EngineSchema.cs               -- data model (PrototypeTypeInfo, ComponentTypeInfo, ...)
    │    ├─ XmlDocToMarkdown.cs           -- /// doc comments → hover Markdown, incl. <inheritdoc cref>
-   │    └─ AssetFieldHeuristics.cs       -- SpriteKey/ShaderPath/"Key"-on-Animation* → asset kind
+   │    └─ AssetFieldHeuristics.cs       -- SpriteKey/ShaderPath/ProtoId<T>/"Key"-on-Animation* → field kind
    ├─ Yaml/
    │    ├─ PrototypeYamlParser.cs        -- YamlDotNet → PrototypeDocument with LSP ranges
    │    ├─ NodeContext.cs / NodeContextResolver.cs  -- "what's under the cursor"
-   │    └─ OpenDocumentStore.cs          -- full-text sync cache for open documents
+   │    ├─ OpenDocumentStore.cs          -- full-text sync cache for open documents
+   │    └─ PrototypeIdIndexer.cs         -- workspace-wide id: index, reuses PrototypeYamlParser
    ├─ Assets/
    │    ├─ ResourceIndexer.cs            -- finds Textures/Shaders folders anywhere in the workspace
    │    └─ SpriteInfoYamlReader.cs       -- reimplements AssetManager.Animation.cs's info.yml parsing
    └─ Features/
         ├─ CompletionHandler.cs
         ├─ HoverHandler.cs
-        └─ PrototypeValidator.cs        -- diagnostics, severities mirrored from PrototypeManager
+        ├─ PrototypeValidator.cs        -- diagnostics, severities mirrored from PrototypeManager
+        ├─ InfoYamlValidator.cs         -- info.yml diagnostics, mirrored from AssetManager.Animation.cs
+        └─ InfoYamlCompletionHandler.cs -- info.yml 'files:' PNG-name completion
 ```
 
 ## Key design decisions

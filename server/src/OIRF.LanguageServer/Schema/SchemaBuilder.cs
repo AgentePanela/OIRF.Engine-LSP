@@ -132,6 +132,7 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
             var asset = memberType is not null
                 ? AssetFieldHeuristics.Classify(member, memberType, yamlName, symbol.ToDisplayString())
                 : null;
+            var protoId = memberType is not null ? AssetFieldHeuristics.ClassifyProtoId(memberType) : null;
 
             dataFields.Add(new DataFieldInfo(
                 yamlName,
@@ -143,7 +144,8 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
                 doc,
                 asset,
                 GetLocation(member),
-                memberType is not null ? GetValueChoices(memberType) : null));
+                memberType is not null ? GetValueChoices(memberType) : null,
+                protoId));
         }
 
         var info = new PrototypeTypeInfo(typeKey, loadPriority, symbol.ToDisplayString(), classSignature, isInheriting, classDoc, dataFields, classLocation);
@@ -197,6 +199,7 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
             var asset = memberType is not null
                 ? AssetFieldHeuristics.Classify(member, memberType, member.Name, symbol.ToDisplayString())
                 : null;
+            var protoId = memberType is not null ? AssetFieldHeuristics.ClassifyProtoId(memberType) : null;
 
             members.Add(new MemberInfo(
                 ToCamelCase(member.Name),
@@ -205,7 +208,8 @@ public sealed class SchemaBuilder(ILogger<SchemaBuilder> logger)
                 doc,
                 asset,
                 GetLocation(member),
-                memberType is not null ? GetValueChoices(memberType) : null));
+                memberType is not null ? GetValueChoices(memberType) : null,
+                protoId));
         }
 
         var info = new ComponentTypeInfo(name, symbol.Name, symbol.ToDisplayString(), classSignature, classDoc, members, classLocation);

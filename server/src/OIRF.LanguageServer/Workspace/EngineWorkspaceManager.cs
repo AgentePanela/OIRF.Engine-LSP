@@ -1,13 +1,15 @@
 using Microsoft.Extensions.Logging;
 using OIRF.LanguageServer.Assets;
 using OIRF.LanguageServer.Schema;
+using OIRF.LanguageServer.Yaml;
 
 namespace OIRF.LanguageServer.Workspace;
 
 /// <summary>
-/// Ties together workspace resolution, the Roslyn schema, and the resource index for one LSP
-/// session, and owns the debounced rescan triggers for both. Every feature handler
-/// (Completion/Hover/diagnostics) reads <see cref="Schema"/>/<see cref="Resources"/> off this.
+/// Ties together workspace resolution, the Roslyn schema, the resource index, and the
+/// prototype-id index for one LSP session, and owns the debounced rescan triggers for all three.
+/// Every feature handler (Completion/Hover/diagnostics) reads
+/// <see cref="Schema"/>/<see cref="Resources"/>/<see cref="PrototypeIds"/> off this.
 /// </summary>
 public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisposable
 {
@@ -28,6 +30,8 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
     public EngineSchema Schema { get; private set; } = EngineSchema.Empty;
 
     public ResourceIndex Resources { get; private set; } = ResourceIndex.Empty;
+
+    public PrototypeIdIndex PrototypeIds { get; private set; } = PrototypeIdIndex.Empty;
 
     /// <summary>
     /// Defense-in-depth check re-evaluated after every schema/resource rebuild: every feature
@@ -66,12 +70,14 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
 
         await RebuildSchemaAsync(cancellationToken);
         RebuildResourceIndex();
+        RebuildPrototypeIdIndex();
         DetermineIsEngineWorkspace();
 
         _csharpRescanQueue = new DebouncedRescanQueue(TimeSpan.FromMilliseconds(750), RebuildSchemaAsync);
         _resourceRescanQueue = new DebouncedRescanQueue(TimeSpan.FromMilliseconds(500), _ =>
         {
             RebuildResourceIndex();
+            RebuildPrototypeIdIndex();
             return Task.CompletedTask;
         });
     }
@@ -84,7 +90,8 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
         _csharpRescanQueue?.Trigger();
     }
 
-    public void NotifyResourceFileChanged() => _resourceRescanQueue?.Trigger();
+    /// <summary>Any non-.cs workspace change - a Textures/Shaders asset or a Prototypes YAML file.</summary>
+    public void NotifyWorkspaceFileChanged() => _resourceRescanQueue?.Trigger();
 
     private async Task RebuildSchemaAsync(CancellationToken cancellationToken)
     {
@@ -123,6 +130,11 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
     private void RebuildResourceIndex()
     {
         Resources = ResourceIndexer.Build(_workspaceRoots, loggerFactory.CreateLogger("ResourceIndexer"));
+    }
+
+    private void RebuildPrototypeIdIndex()
+    {
+        PrototypeIds = PrototypeIdIndexer.Build(_workspaceRoots, loggerFactory.CreateLogger("PrototypeIdIndexer"));
     }
 
     private void DetermineIsEngineWorkspace()
