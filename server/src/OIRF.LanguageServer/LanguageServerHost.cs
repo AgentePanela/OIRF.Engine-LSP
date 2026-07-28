@@ -20,6 +20,17 @@ public static class LanguageServerHost
         new TextDocumentFilter { Pattern = "**/Prototypes/**/*.yml" },
         new TextDocumentFilter { Pattern = "**/Prototypes/**/*.yaml" });
 
+    // Document open/change/save/close and completion are wired against both grammars at once
+    // (each handler branches internally on IsInfoYaml) - Hover/Definition stay Prototype-only,
+    // see the scope note on InfoYamlValidator/InfoYamlCompletionHandler.
+    private static readonly TextDocumentSelector WatchedYamlSelector = new(
+        new TextDocumentFilter { Pattern = "**/Prototypes/**/*.yml" },
+        new TextDocumentFilter { Pattern = "**/Prototypes/**/*.yaml" },
+        new TextDocumentFilter { Pattern = "**/Textures/**/info.yml" });
+
+    private static bool IsInfoYaml(string? path) =>
+        path is not null && string.Equals(Path.GetFileName(path), "info.yml", StringComparison.OrdinalIgnoreCase);
+
     public static async Task RunAsync(string[] args)
     {
         using var loggerFactory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder => builder
@@ -53,7 +64,10 @@ public static class LanguageServerHost
             if (manager is null || !manager.IsEngineWorkspace || textDocument is null)
                 return;
 
-            var diagnostics = PrototypeValidator.Validate(text, manager.Schema).ToList();
+            var path = uri.GetFileSystemPath();
+            var diagnostics = IsInfoYaml(path)
+                ? InfoYamlValidator.Validate(text, Path.GetDirectoryName(path)!).ToList()
+                : PrototypeValidator.Validate(text, manager.Schema).ToList();
             textDocument.PublishDiagnostics(new PublishDiagnosticsParams
             {
                 Uri = uri,
@@ -124,7 +138,10 @@ public static class LanguageServerHost
         {
             if (manager is { IsEngineWorkspace: true } && documentStore.TryGet(request.TextDocument.Uri, out var text))
             {
-                var items = CompletionHandler.Handle(text, request.Position, manager.Schema, manager.Resources).ToList();
+                var path = request.TextDocument.Uri.GetFileSystemPath();
+                var items = IsInfoYaml(path)
+                    ? InfoYamlCompletionHandler.Handle(text, request.Position, Path.GetDirectoryName(path)!).ToList()
+                    : CompletionHandler.Handle(text, request.Position, manager.Schema, manager.Resources).ToList();
                 return Task.FromResult(new CompletionList(items));
             }
 
@@ -182,10 +199,10 @@ public static class LanguageServerHost
 
                 return Task.CompletedTask;
             })
-            .OnDidOpenTextDocument(onDidOpen, (_, _) => new TextDocumentOpenRegistrationOptions { DocumentSelector = PrototypeSelector })
-            .OnDidChangeTextDocument(onDidChange, (_, _) => new TextDocumentChangeRegistrationOptions { DocumentSelector = PrototypeSelector, SyncKind = TextDocumentSyncKind.Full })
-            .OnDidSaveTextDocument(onDidSave, (_, _) => new TextDocumentSaveRegistrationOptions { DocumentSelector = PrototypeSelector })
-            .OnDidCloseTextDocument(onDidClose, (_, _) => new TextDocumentCloseRegistrationOptions { DocumentSelector = PrototypeSelector })
+            .OnDidOpenTextDocument(onDidOpen, (_, _) => new TextDocumentOpenRegistrationOptions { DocumentSelector = WatchedYamlSelector })
+            .OnDidChangeTextDocument(onDidChange, (_, _) => new TextDocumentChangeRegistrationOptions { DocumentSelector = WatchedYamlSelector, SyncKind = TextDocumentSyncKind.Full })
+            .OnDidSaveTextDocument(onDidSave, (_, _) => new TextDocumentSaveRegistrationOptions { DocumentSelector = WatchedYamlSelector })
+            .OnDidCloseTextDocument(onDidClose, (_, _) => new TextDocumentCloseRegistrationOptions { DocumentSelector = WatchedYamlSelector })
             .OnDidChangeWatchedFiles(onDidChangeWatchedFiles, (_, _) => new DidChangeWatchedFilesRegistrationOptions
             {
                 Watchers = new Container<OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher>(
@@ -195,12 +212,13 @@ public static class LanguageServerHost
             })
             .OnCompletion(onCompletion, (_, _) => new CompletionRegistrationOptions
             {
-                DocumentSelector = PrototypeSelector,
+                DocumentSelector = WatchedYamlSelector,
                 // Beyond VSCode's default "typing a word character" auto-trigger: fires
                 // completion immediately after these too, since a lot of useful completion
                 // positions in this grammar sit right after one of them with no word char yet
-                // (a fresh "- " bullet, a value position right after "key: ").
-                TriggerCharacters = new Container<string>(" ", "-", ":"),
+                // (a fresh "- " bullet, a value position right after "key: "). "[" and "," are
+                // for info.yml's inline flow 'files: [...]' list specifically.
+                TriggerCharacters = new Container<string>(" ", "-", ":", "[", ","),
             })
             .OnHover(onHover, (_, _) => new HoverRegistrationOptions { DocumentSelector = PrototypeSelector })
             .OnDefinition(onDefinition, (_, _) => new DefinitionRegistrationOptions { DocumentSelector = PrototypeSelector })
