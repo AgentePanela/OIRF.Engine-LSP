@@ -66,7 +66,7 @@ public sealed class RoslynWorkspaceHost(ILogger<RoslynWorkspaceHost> logger) : I
             logger.LogWarning(ex, "Failed to fully load workspace entry point {EntryPoint}", entryPoint.SolutionPath ?? string.Join(", ", entryPoint.LooseProjectPaths));
         }
 
-        _currentSolution = workspace.CurrentSolution;
+        _currentSolution = StripAnalyzerReferences(workspace.CurrentSolution);
         RefreshEngineRelevantProjects();
         logger.LogInformation(
             "Loaded {ProjectCount} project(s), {RelevantCount} engine-relevant",
@@ -112,6 +112,25 @@ public sealed class RoslynWorkspaceHost(ILogger<RoslynWorkspaceHost> logger) : I
         _currentSolution = solution;
         RefreshEngineRelevantProjects();
         return true;
+    }
+
+    // SchemaBuilder only ever reads hand-written syntax via Project.GetCompilationAsync() +
+    // project.Documents - it never looks at generator-produced documents. But just having
+    // AnalyzerReferences on a project makes GetCompilationAsync() load and run them anyway (so
+    // the Workspace API can keep generated code in sync for IDE features), which Assembly.Loads
+    // the referenced analyzer/generator DLL into this long-lived process and keeps a file lock on
+    // it for as long as the LSP stays running (e.g. Engine.Generators.dll, referenced by
+    // Engine.Client.csproj as an analyzer) - blocking a real `dotnet build` of that project the
+    // whole time. Stripping the references here means Roslyn never touches those assemblies.
+    private static Solution StripAnalyzerReferences(Solution solution)
+    {
+        foreach (var project in solution.Projects)
+        {
+            if (project.AnalyzerReferences.Count > 0)
+                solution = solution.WithProjectAnalyzerReferences(project.Id, []);
+        }
+
+        return solution;
     }
 
     private void RefreshEngineRelevantProjects() =>
