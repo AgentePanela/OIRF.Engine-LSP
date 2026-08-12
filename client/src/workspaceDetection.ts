@@ -33,7 +33,7 @@ export async function detectEngineWorkspace(): Promise<DetectionResult> {
   }
 
   const projectFiles = await vscode.workspace.findFiles(
-    "**/*.{sln,csproj}",
+    "**/*.{sln,slnx,csproj}",
     EXCLUDE_GLOB,
     50
   );

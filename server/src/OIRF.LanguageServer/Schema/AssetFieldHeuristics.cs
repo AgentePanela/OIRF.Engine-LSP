@@ -23,6 +23,10 @@ public static class AssetFieldHeuristics
     private const string AnimationKeyAttributeFqn = "Engine.Shared.Assets.AnimationKeyAttribute";
     private const string ShaderKeyAttributeFqn = "Engine.Shared.Assets.ShaderKeyAttribute";
 
+    // ProtoId<T> (Engine.Shared/Types.cs) declares no namespace, so its open-generic display is
+    // just "ProtoId<T>" - no namespace prefix to include, unlike the FQNs above.
+    private const string ProtoIdOpenGenericDisplay = "ProtoId<T>";
+
     /// <param name="member">
     /// The field/property symbol itself, so an explicit marker attribute can be checked directly
     /// (attributes live on the member, not its type).
@@ -70,5 +74,57 @@ public static class AssetFieldHeuristics
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Deterministic, type-only classification (no name-guessing needed, unlike the low-confidence
+    /// fallbacks above): a field typed <c>ProtoId&lt;T&gt;</c> should offer completion from every
+    /// known <c>id:</c> value of prototypes registered as <c>T</c>. Checked against
+    /// <see cref="UnwrapToElementType"/>'s result so it still matches when <c>ProtoId&lt;T&gt;</c>
+    /// is wrapped in <c>Nullable&lt;T&gt;</c>, an array (any rank), or a single-type-argument
+    /// collection (<c>List&lt;T&gt;</c>, <c>HashSet&lt;T&gt;</c>, ...) - all real shapes it's
+    /// declared in across the engine (e.g. <c>HashSet&lt;ProtoId&lt;TagPrototype&gt;&gt;</c>,
+    /// <c>ProtoId&lt;TilePrototype&gt;?[,]</c>).
+    /// </summary>
+    public static ProtoIdClassification? ClassifyProtoId(ITypeSymbol type)
+    {
+        var element = UnwrapToElementType(type);
+
+        if (element is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } named &&
+            named.OriginalDefinition.ToDisplayString() == ProtoIdOpenGenericDisplay)
+        {
+            return new ProtoIdClassification(named.TypeArguments[0].ToDisplayString());
+        }
+
+        return null;
+    }
+
+    private static ITypeSymbol UnwrapToElementType(ITypeSymbol type)
+    {
+        while (true)
+        {
+            if (type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T } nullable)
+            {
+                type = nullable.TypeArguments[0];
+                continue;
+            }
+
+            if (type is IArrayTypeSymbol array)
+            {
+                type = array.ElementType;
+                continue;
+            }
+
+            // Guard against unwrapping ProtoId<T> itself - it's also "a generic type with one
+            // type argument", but T there is the prototype type, not another wrapper layer.
+            if (type is INamedTypeSymbol { IsGenericType: true, TypeArguments.Length: 1 } collection &&
+                collection.OriginalDefinition.ToDisplayString() != ProtoIdOpenGenericDisplay)
+            {
+                type = collection.TypeArguments[0];
+                continue;
+            }
+
+            return type;
+        }
     }
 }

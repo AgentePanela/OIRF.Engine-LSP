@@ -16,6 +16,18 @@ public class SchemaBuilderTests
 {
     private const string FixtureSource = """
         using System;
+        using System.Collections.Generic;
+
+        // Global namespace, mirroring the real engine's Engine.Shared/Types.cs - no namespace
+        // declaration wraps it there either.
+        public readonly struct ProtoId<T> where T : Engine.Shared.Prototypes.IPrototype
+        {
+            public readonly string Id;
+            public ProtoId(string id) { Id = id; }
+            public override string ToString() => Id;
+            public static implicit operator string(ProtoId<T> id) => id.Id;
+            public static implicit operator ProtoId<T>(string id) => new(id);
+        }
 
         namespace Engine.Shared.Prototypes
         {
@@ -101,6 +113,26 @@ public class SchemaBuilderTests
             {
                 /// <inheritdoc cref="PhysicsComponent.Friction"/>
                 public float Friction { get; set; }
+            }
+
+            [Prototype("tag")]
+            public sealed class TagPrototype : IPrototype
+            {
+                public string Type => "tag";
+
+                [DataField("id", required: true)]
+                public string ID { get; set; } = "";
+            }
+
+            /// <summary>Covers every ProtoId&lt;T&gt; shape the real engine declares fields as.</summary>
+            [RegisterComponent("Tags")]
+            public sealed class TagsComponent : Component
+            {
+                public ProtoId<TagPrototype> PrimaryTag { get; set; }
+                public ProtoId<TagPrototype>? OptionalTag { get; set; }
+                public HashSet<ProtoId<TagPrototype>> Tags { get; set; } = new();
+                public ProtoId<TagPrototype>[] TagArray { get; set; } = [];
+                public string PlainString { get; set; } = "";
             }
         }
         """;
@@ -199,5 +231,32 @@ public class SchemaBuilderTests
         var friction = Assert.Single(component!.Members, m => m.Name == "friction");
 
         Assert.Equal("Linear drag applied every frame.", friction.DocMarkdown);
+    }
+
+    [Theory]
+    [InlineData("primaryTag")]
+    [InlineData("optionalTag")]
+    [InlineData("tags")]
+    [InlineData("tagArray")]
+    public async Task ProtoId_of_T_is_classified_regardless_of_nullable_or_collection_wrapping(string memberName)
+    {
+        var schema = await BuildSchemaAsync();
+
+        Assert.True(schema.ComponentsByName.TryGetValue("Tags", out var component));
+        var member = Assert.Single(component!.Members, m => m.Name == memberName);
+
+        Assert.NotNull(member.ProtoId);
+        Assert.Equal("TestGame.TagPrototype", member.ProtoId!.PrototypeClrTypeName);
+    }
+
+    [Fact]
+    public async Task Plain_string_member_is_not_classified_as_protoid()
+    {
+        var schema = await BuildSchemaAsync();
+
+        Assert.True(schema.ComponentsByName.TryGetValue("Tags", out var component));
+        var member = Assert.Single(component!.Members, m => m.Name == "plainString");
+
+        Assert.Null(member.ProtoId);
     }
 }

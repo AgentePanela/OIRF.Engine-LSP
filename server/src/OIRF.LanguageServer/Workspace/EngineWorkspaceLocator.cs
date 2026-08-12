@@ -1,16 +1,17 @@
 namespace OIRF.LanguageServer.Workspace;
 
 /// <summary>
-/// Finds the .sln/.csproj to open for a given workspace folder. Handles three cases: the
-/// workspace root is a downstream game repo (its own .sln at the root, possibly alongside a
-/// nested engine .sln inside a submodule), the workspace root is the engine repo itself
-/// (only the engine .sln exists), or an arbitrary subfolder with no .sln at all (falls back to
-/// loose .csproj discovery).
+/// Finds the .sln/.slnx/.csproj to open for a given workspace folder. Handles three cases: the
+/// workspace root is a downstream game repo (its own .sln/.slnx at the root, possibly alongside a
+/// nested engine .sln/.slnx inside a submodule), the workspace root is the engine repo itself
+/// (only the engine .sln/.slnx exists), or an arbitrary subfolder with no solution file at all
+/// (falls back to loose .csproj discovery).
 /// </summary>
 public static class EngineWorkspaceLocator
 {
     private static readonly string[] ExcludedDirNames = ["bin", "obj", "node_modules", ".git"];
     private static readonly string[] EngineProjectNames = ["Engine.Shared", "Engine.Client", "Engine.Server"];
+    private static readonly string[] SolutionSearchPatterns = ["*.sln", "*.slnx"];
 
     private const int SolutionSearchMaxDepth = 3;
     private const int LooseProjectSearchMaxDepth = 2;
@@ -25,12 +26,18 @@ public static class EngineWorkspaceLocator
         if (!Directory.Exists(workspaceRootPath))
             return new EntryPoint(null, []);
 
-        var solutionCandidates = FindFiles(workspaceRootPath, "*.sln", SolutionSearchMaxDepth);
+        var solutionCandidates = SolutionSearchPatterns
+            .SelectMany(pattern => FindFiles(workspaceRootPath, pattern, SolutionSearchMaxDepth))
+            .ToList();
         if (solutionCandidates.Count > 0)
         {
+            // When both formats exist for what is otherwise the same candidate (mid-migration to
+            // the newer .slnx format), prefer .slnx - it's the format the tie-break would
+            // otherwise lose to plain alphabetical ordering ("x" sorts after nothing).
             var best = solutionCandidates
                 .OrderBy(p => PathDepth(workspaceRootPath, p))
                 .ThenByDescending(CountEngineReferences)
+                .ThenBy(p => IsSlnx(p) ? 0 : 1)
                 .ThenBy(p => p, StringComparer.OrdinalIgnoreCase)
                 .First();
             return new EntryPoint(best, []);
@@ -92,11 +99,16 @@ public static class EngineWorkspaceLocator
         return relative.Count(c => c is '/' or '\\');
     }
 
+    private static bool IsSlnx(string solutionPath) =>
+        Path.GetExtension(solutionPath).Equals(".slnx", StringComparison.OrdinalIgnoreCase);
+
     /// <summary>
-    /// Cheap ranking signal: a .sln's own text already lists every referenced project's name and
-    /// relative path (e.g. `Project("{...}") = "Engine.Client", "Engine\Engine.Client\...csproj", ...`),
-    /// so a substring count over the raw .sln text is enough to prefer the solution that actually
-    /// wires up the engine, without needing to parse every referenced .csproj at ranking time.
+    /// Cheap ranking signal: a solution file's own text already lists every referenced project's
+    /// name and relative path (classic .sln: `Project("{...}") = "Engine.Client",
+    /// "Engine\Engine.Client\...csproj", ...`; .slnx: `&lt;Project Path="Engine\Engine.Client\...csproj" /&gt;`),
+    /// so a substring count over the raw solution text is enough to prefer the solution that
+    /// actually wires up the engine, without needing to parse every referenced .csproj at ranking
+    /// time.
     /// </summary>
     private static int CountEngineReferences(string solutionPath)
     {

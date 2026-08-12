@@ -14,12 +14,27 @@ Shipped:
 - Asset-path completion for sprite (`SpriteKey` + name heuristics, including full `info.yml`
   spritesheet/explicit-frame key derivation) and shader (`ShaderPath` + name heuristics) fields,
   plus a distinct `Animation` key kind for `AnimationComponent.Key`-shaped fields.
+- Editing support for `info.yml` itself (`**/Textures/**/info.yml`): diagnostics mirroring every
+  throw condition in the real `Engine.Client.Assets.AssetManager.Animation.cs`
+  (`ParseInfoFile`/`ParseAnimationEntry`) as Errors, plus Warnings for mistakes the engine doesn't
+  crash on but silently misbehaves for (a `files:` entry pointing at a PNG that doesn't exist next
+  to the info.yml, a duplicate `id` silently overwriting an earlier definition), and completion for
+  PNG file names inside a `files:` value (both inline-flow and block-list styles). Hover/definition
+  intentionally out of scope for now - see `InfoYamlValidator`/`InfoYamlCompletionHandler`.
+- Completion for `ProtoId<T>` fields (bare, nullable, or as a collection/array element - e.g.
+  `HashSet<ProtoId<TagPrototype>>`, `ProtoId<TilePrototype>?[,]`): offers every known `id:` value
+  of prototypes registered as `T`, sourced from a new workspace-wide `PrototypeIdIndex` (built by
+  re-running `PrototypeYamlParser` over every `**/Prototypes/**/*.{yml,yaml}` file, not just the
+  one currently open - `EngineSchema` alone only knows the C# type *definitions*, never the actual
+  instances authored in YAML). Verified against the real `Project.Trieste/Game/AutoTiling/AutoTileComponent.Group`
+  field (`ProtoId<TagPrototype>`). See `AssetFieldHeuristics.ClassifyProtoId`/`PrototypeIdIndexer`.
 - Verified end-to-end against the real `Project-Eptus` workspace: schema built (5 prototype
   types, 15 component types — matching the engine's built-ins plus `Project.Eptus`'s custom
   `NoSaveComponent`/`InputMoverComponent`), completion/hover/diagnostics all confirmed live
   against `Resources/Prototypes/Entities/Player.yml`.
-- 18 unit tests (`SchemaBuilderTests`, `PrototypeYamlParserTests`, `PrototypeValidatorTests`), all
-  passing.
+- 67 unit tests (`SchemaBuilderTests`, `PrototypeYamlParserTests`, `PrototypeValidatorTests`,
+  `EngineWorkspaceLocatorTests`, `RoslynWorkspaceHostSlnxTests`, `InfoYamlValidatorTests`,
+  `InfoYamlCompletionHandlerTests`, `PrototypeIdIndexerTests`, and others), all passing.
 
 Not yet done (explicitly out of scope for M1, tracked here so nothing is forgotten):
 - **Packaging**: no `vsce package` / `.vsix` build has been produced yet, and the
