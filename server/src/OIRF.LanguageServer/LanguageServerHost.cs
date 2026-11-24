@@ -65,6 +65,12 @@ public static class LanguageServerHost
                 return;
 
             var path = uri.GetFileSystemPath();
+            if (!MSBuildAvailability.IsAvailable && !IsInfoYaml(path))
+            {
+                textDocument.PublishDiagnostics(new PublishDiagnosticsParams { Uri = uri, Diagnostics = new Container<Diagnostic>() });
+                return;
+            }
+
             var diagnostics = IsInfoYaml(path)
                 ? InfoYamlValidator.Validate(text, Path.GetDirectoryName(path)!).ToList()
                 : PrototypeValidator.Validate(text, manager.Schema).ToList();
@@ -186,7 +192,11 @@ public static class LanguageServerHost
             })
             .OnInitialized((server, _, _, _) =>
             {
-                if (manager is { IsEngineWorkspace: true })
+                if (!MSBuildAvailability.IsAvailable)
+                {
+                    server.Window.ShowWarning(MSBuildAvailability.UserFacingWarning);
+                }
+                else if (manager is { IsEngineWorkspace: true })
                 {
                     server.Window.LogInfo(
                         $"OIRF Engine LSP: workspace ready - {manager.Schema.PrototypesByTypeKey.Count} prototype type(s), " +

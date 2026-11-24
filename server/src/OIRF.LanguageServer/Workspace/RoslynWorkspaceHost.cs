@@ -37,6 +37,12 @@ public sealed class RoslynWorkspaceHost(ILogger<RoslynWorkspaceHost> logger) : I
             return false;
         }
 
+        if (!MSBuildAvailability.IsAvailable)
+        {
+            logger.LogWarning("MSBuild is not available ({Reason}); Roslyn workspace not loaded.", MSBuildAvailability.FailureReason);
+            return false;
+        }
+
         _workspace?.Dispose();
         var workspace = MSBuildWorkspace.Create();
         workspace.RegisterWorkspaceFailedHandler(e =>

@@ -8,6 +8,9 @@
     <RootNamespace>OIRF.LanguageServer</RootNamespace>
     <AssemblyName>OIRF.LanguageServer</AssemblyName>
     <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- MSBuildLocator only offers SDKs whose version is <= the running runtime. A machine with only
+         a newer SDK (e.g. 10.x) would otherwise find no MSBuild when we run on the net9 runtime. -->
+    <RollForward>LatestMajor</RollForward>
   </PropertyGroup>
 
   <ItemGroup>
