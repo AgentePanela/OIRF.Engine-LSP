@@ -7,7 +7,10 @@ public sealed class ResourceIndex
 {
     public required IReadOnlyList<string> SpriteKeys { get; init; }
     public required IReadOnlyList<string> AnimationKeys { get; init; }
+    /// <summary>.fx file names (no extension, no folder) - see IndexShadersRoot.</summary>
     public required IReadOnlyList<string> ShaderKeys { get; init; }
+    public IReadOnlyList<string> AudioKeys { get; init; } = [];
+    public IReadOnlyList<string> FontKeys { get; init; } = [];
 
     public static readonly ResourceIndex Empty = new() { SpriteKeys = [], AnimationKeys = [], ShaderKeys = [] };
 
@@ -15,13 +18,15 @@ public sealed class ResourceIndex
     {
         AssetKind.Sprite => SpriteKeys,
         AssetKind.Animation => AnimationKeys,
-        AssetKind.Shader => ShaderKeys,
+        AssetKind.Shader or AssetKind.ShaderFile => ShaderKeys,
+        AssetKind.Audio or AssetKind.Sound => AudioKeys,
+        AssetKind.Font => FontKeys,
         _ => [],
     };
 }
 
 /// <summary>
-/// Scans the workspace for "Textures"/"Shaders" folders (by name, anywhere - not assumed to sit
+/// Scans the workspace for "Textures"/"Shaders"/"Audios"/"Fonts" folders (by name, anywhere - not assumed to sit
 /// under a folder literally named "Resources", since the engine supports multiple,
 /// arbitrarily-named resource roots) and derives the exact sprite/animation/shader keys the
 /// engine's own asset pipeline would produce.
@@ -34,13 +39,17 @@ public static class ResourceIndexer
     {
         var textureRoots = new List<string>();
         var shaderRoots = new List<string>();
+        var audioRoots = new List<string>();
+        var fontRoots = new List<string>();
 
         foreach (var root in workspaceRoots)
-            FindNamedFolders(root, textureRoots, shaderRoots);
+            FindNamedFolders(root, textureRoots, shaderRoots, audioRoots, fontRoots);
 
         var spriteKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var animationKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var shaderKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var audioKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fontKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var texturesRoot in textureRoots)
             IndexTexturesRoot(texturesRoot, spriteKeys, animationKeys, logger);
@@ -48,15 +57,23 @@ public static class ResourceIndexer
         foreach (var shadersRoot in shaderRoots)
             IndexShadersRoot(shadersRoot, shaderKeys);
 
+        foreach (var audioRoot in audioRoots)
+            IndexKeysByRelativePath(audioRoot, "*.ogg", audioKeys);
+
+        foreach (var fontRoot in fontRoots)
+            IndexKeysByRelativePath(fontRoot, "*.ttf", fontKeys);
+
         return new ResourceIndex
         {
             SpriteKeys = spriteKeys.ToList(),
             AnimationKeys = animationKeys.ToList(),
             ShaderKeys = shaderKeys.ToList(),
+            AudioKeys = audioKeys.ToList(),
+            FontKeys = fontKeys.ToList(),
         };
     }
 
-    private static void FindNamedFolders(string root, List<string> textureRoots, List<string> shaderRoots)
+    private static void FindNamedFolders(string root, List<string> textureRoots, List<string> shaderRoots, List<string> audioRoots, List<string> fontRoots)
     {
         if (!Directory.Exists(root))
             return;
@@ -68,6 +85,11 @@ public static class ResourceIndexer
                 textureRoots.Add(dir);
             if (string.Equals(name, "Shaders", StringComparison.OrdinalIgnoreCase))
                 shaderRoots.Add(dir);
+            // SharedAudioManifest.ResPath is literally "Audios" (plural), not "Audio".
+            if (string.Equals(name, "Audios", StringComparison.OrdinalIgnoreCase))
+                audioRoots.Add(dir);
+            if (string.Equals(name, "Fonts", StringComparison.OrdinalIgnoreCase))
+                fontRoots.Add(dir);
 
             IEnumerable<string> subdirectories;
             try
@@ -107,6 +129,29 @@ public static class ResourceIndexer
 
         foreach (var file in files)
             shaderKeys.Add(Path.GetFileNameWithoutExtension(file));
+    }
+
+    /// <summary>
+    /// Every file matching <paramref name="pattern"/> under the root, recursively, keyed by its
+    /// path relative to the root without extension
+    /// </summary>
+    private static void IndexKeysByRelativePath(string resourceRoot, string pattern, HashSet<string> keys)
+    {
+        IEnumerable<string> files;
+        try
+        {
+            files = Directory.EnumerateFiles(resourceRoot, pattern, SearchOption.AllDirectories);
+        }
+        catch (Exception)
+        {
+            return;
+        }
+
+        foreach (var file in files)
+        {
+            var relative = ToRelativeForwardSlash(resourceRoot, file);
+            keys.Add(relative[..^Path.GetExtension(file).Length]);
+        }
     }
 
     private static void IndexTexturesRoot(string texturesRoot, HashSet<string> spriteKeys, HashSet<string> animationKeys, ILogger logger)

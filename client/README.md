@@ -34,3 +34,13 @@ asset-path completion) for the YAML **Prototype** files
 
 - Documentation
     - Fields, components, prototypes will show their c# summary.
+
+## Changelog
+
+> Pre-release 1.0.0
+- style prototypes surport
+- parent auto complete with all prototypes
+- font auto complete
+- audios auto complete
+- shader prototype suport
+- audio specifier support

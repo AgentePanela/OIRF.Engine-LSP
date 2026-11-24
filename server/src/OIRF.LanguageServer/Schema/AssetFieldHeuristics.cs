@@ -6,7 +6,8 @@ namespace OIRF.LanguageServer.Schema;
 /// Classifies a field/member as an asset-path reference. Highest confidence: the engine's own
 /// dedicated wrapper types (<c>SpriteKey</c>/<c>ShaderPath</c>) or an explicit marker attribute
 /// (<c>Engine.Shared.Assets.TextureKeyAttribute</c>/<c>AnimationKeyAttribute</c>/
-/// <c>ShaderKeyAttribute</c>) on a plain `string` field - the deterministic alternative to
+/// <c>ShaderKeyAttribute</c>/<c>AudioKeyAttribute</c>) on a plain `string` field (or a collection
+/// of them) - the deterministic alternative to
 /// name-guessing for fields that can't use a dedicated wrapper type directly (e.g.
 /// <c>TilePrototype.Sprite</c>, <c>AnimationComponent.Key</c>). Anything else falls back to a
 /// low-confidence name-keyword heuristic, since not every asset-path field is marked yet.
@@ -22,6 +23,11 @@ public static class AssetFieldHeuristics
     private const string TextureKeyAttributeFqn = "Engine.Shared.Assets.TextureKeyAttribute";
     private const string AnimationKeyAttributeFqn = "Engine.Shared.Assets.AnimationKeyAttribute";
     private const string ShaderKeyAttributeFqn = "Engine.Shared.Assets.ShaderKeyAttribute";
+    private const string AudioKeyAttributeFqn = "Engine.Shared.Assets.AudioKeyAttribute";
+    private const string SoundSpecifierFqn = "Engine.Shared.Audio.SoundSpecifier";
+    private const string ShaderPrototypeFqn = "Engine.Shared.Graphics.ShaderPrototype";
+    private const string FontFamilyPrototypeFqn = "Engine.Client.Graphics.Fonts.FontFamilyPrototype";
+    private static readonly string[] FontFamilyFileFields = ["regular", "bold", "italic", "boldItalic"];
 
     // ProtoId<T> (Engine.Shared/Types.cs) declares no namespace, so its open-generic display is
     // just "ProtoId<T>" - no namespace prefix to include, unlike the FQNs above.
@@ -37,7 +43,16 @@ public static class AssetFieldHeuristics
     /// </param>
     public static AssetClassification? Classify(ISymbol member, ITypeSymbol type, string fieldName, string containingTypeDisplayName)
     {
-        var typeName = type.ToDisplayString();
+        // Same unwrapping as ClassifyProtoId: the marker attribute sits on the member, but the
+        // value being authored may be a list of keys, e.g. SoundCollectionPrototype.Files
+        // ([AudioKey] List<string>) - each element is the key.
+        type = UnwrapToElementType(type);
+        // Strip a reference-type '?' annotation (e.g. "SoundSpecifier? SaySound"), which
+        // ToDisplayString would otherwise keep in the name being compared.
+        var typeName = type.WithNullableAnnotation(NullableAnnotation.NotAnnotated).ToDisplayString();
+
+        if (typeName == SoundSpecifierFqn)
+            return new AssetClassification(AssetKind.Sound, ["Audios"], HighConfidence: true);
 
         if (typeName == SpriteKeyFqn)
             return new AssetClassification(AssetKind.Sprite, ["Textures"], HighConfidence: true);
@@ -60,6 +75,18 @@ public static class AssetFieldHeuristics
 
         if (attributeFqns.Contains(ShaderKeyAttributeFqn))
             return new AssetClassification(AssetKind.Shader, ["Shaders"], HighConfidence: true);
+
+        if (attributeFqns.Contains(AudioKeyAttributeFqn))
+            return new AssetClassification(AssetKind.Audio, ["Audios"], HighConfidence: true);
+
+        // ShaderPrototype.Path is the one place that still names the .fx file itself (everything
+        // else references the prototype id). No marker attribute on it, so match it exactly.
+        if (containingTypeDisplayName == ShaderPrototypeFqn && string.Equals(fieldName, "path", StringComparison.OrdinalIgnoreCase))
+            return new AssetClassification(AssetKind.ShaderFile, ["Shaders"], HighConfidence: true);
+
+        // Same for FontFamilyPrototype: its four variant fields name .ttf files, unmarked.
+        if (containingTypeDisplayName == FontFamilyPrototypeFqn && FontFamilyFileFields.Contains(fieldName, StringComparer.OrdinalIgnoreCase))
+            return new AssetClassification(AssetKind.Font, ["Fonts"], HighConfidence: true);
 
         if (fieldName.Contains("shader", StringComparison.OrdinalIgnoreCase))
             return new AssetClassification(AssetKind.Shader, ["Shaders"], HighConfidence: false);

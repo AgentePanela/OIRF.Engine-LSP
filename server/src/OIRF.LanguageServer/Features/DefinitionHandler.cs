@@ -15,7 +15,7 @@ public static class DefinitionHandler
     public static LocationOrLocationLinks? Handle(string text, LspPosition position, EngineSchema schema)
     {
         var document = PrototypeYamlParser.Parse(text);
-        var context = NodeContextResolver.Resolve(document, position);
+        var context = NodeContextResolver.Resolve(document, position, schema.IsStylePrototype);
 
         var location = context switch
         {
@@ -34,6 +34,13 @@ public static class DefinitionHandler
                 schema.ResolveComponent(ctx.ComponentName)?.Component
                     .Members.FirstOrDefault(m => string.Equals(m.Name, ctx.FieldName, StringComparison.OrdinalIgnoreCase))
                     ?.Location,
+
+            NodeContext.StylePropertyValue ctx =>
+                schema.ResolveStyleProperties(ctx.Control).FirstOrDefault(p => p.Name == ctx.PropertyName)?.Location,
+
+            NodeContext.StyleSelector { Entry: { Name: "control", ScalarValue: { } control } } =>
+                schema.UiControls.Values.FirstOrDefault(c => string.Equals(c.Name, control, StringComparison.OrdinalIgnoreCase))?.Location
+                ?? schema.UiControls.Values.FirstOrDefault(c => c.Aliases.Contains(control, StringComparer.OrdinalIgnoreCase))?.Location,
 
             _ => null,
         };

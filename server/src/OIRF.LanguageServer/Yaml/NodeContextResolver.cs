@@ -2,13 +2,17 @@ namespace OIRF.LanguageServer.Yaml;
 
 public static class NodeContextResolver
 {
-    public static NodeContext Resolve(PrototypeDocument document, LspPosition position)
+    /// <param name="isStyleType">
+    /// Whether a prototype <c>type:</c> is the engine's StylePrototype - only then is a
+    /// <c>rules:</c> list resolved as style rules. Decided by the caller, which has the schema.
+    /// </param>
+    public static NodeContext Resolve(PrototypeDocument document, LspPosition position, Func<string, bool>? isStyleType = null)
     {
         var item = FindEnclosing(document.Items, i => i.ItemRange.Start, position);
-        return item is null ? new NodeContext.None() : ResolveWithinItem(item, position);
+        return item is null ? new NodeContext.None() : ResolveWithinItem(item, position, isStyleType);
     }
 
-    private static NodeContext ResolveWithinItem(PrototypeItem item, LspPosition position)
+    private static NodeContext ResolveWithinItem(PrototypeItem item, LspPosition position, Func<string, bool>? isStyleType)
     {
         var typeKey = item.TypeValue ?? string.Empty;
 
@@ -18,8 +22,16 @@ public static class NodeContextResolver
         if (IsOnValue(item.IdValueRange, position))
             return new NodeContext.PrototypeIdValue();
 
-        if (IsOnValue(item.ParentValueRange, position))
-            return new NodeContext.ParentValue(typeKey, item.IdValue);
+        if (IsOnValue(item.ParentValueRange, position) || IsWithinLines(item.ParentFullRange, position))
+        {
+            return new NodeContext.ParentValue(
+                typeKey,
+                item.IdValue,
+                item.Parents.Select(p => p.Id).ToHashSet(StringComparer.Ordinal));
+        }
+
+        if (item.StyleRulesRange is { } rulesRange && isStyleType?.Invoke(typeKey) == true && IsInRulesRegion(item, rulesRange, position))
+            return ResolveWithinStyleRules(item, position);
 
         // Bounded by the next sibling's start (or open-ended for the last one) rather than a
         // strict Contains on ComponentsListRange's own end - the end mark only reaches as far as
@@ -39,7 +51,7 @@ public static class NodeContextResolver
             // Hovering an existing field's key or its value both resolve to the same
             // "FieldValue" context - the doc lookup is identical either way. TopLevelFieldKey is
             // reserved for the generic "cursor on a blank/new key position" completion case below.
-            if (IsOnValue(field.ValueRange, position) || field.KeyRange.Contains(position))
+            if (IsOnValue(field.ValueRange, position) || IsInScalarSequence(field, position) || field.KeyRange.Contains(position))
                 return new NodeContext.TopLevelFieldValue(typeKey, field.Name);
         }
 
@@ -47,6 +59,77 @@ public static class NodeContextResolver
         // position) - still offer top-level field completion.
         return new NodeContext.TopLevelFieldKey(typeKey, ExistingNames(item.TopLevelFields));
     }
+
+    // From the first rule to just before the next top-level key written after "rules:" (if any).
+    private static bool IsInRulesRegion(PrototypeItem item, LspRange rulesRange, LspPosition position)
+    {
+        if (IsBefore(position, rulesRange.Start))
+            return false;
+
+        var nextKey = item.TopLevelFields
+            .Select(f => f.KeyRange.Start)
+            .Where(start => IsBefore(rulesRange.Start, start))
+            .OrderBy(start => start.Line).ThenBy(start => start.Character)
+            .FirstOrDefault();
+
+        return nextKey is null || IsBefore(position, nextKey);
+    }
+
+    /// <summary>
+    /// Inside a <c>rules:</c> list. Each line belongs to the last rule-level key at or above it
+    /// (class/properties): past that key on its own line, or indented deeper than the rule's keys
+    /// on a following line, the cursor is in that key's value; otherwise it's at a new rule-level key.
+    /// </summary>
+    private static NodeContext ResolveWithinStyleRules(PrototypeItem item, LspPosition position)
+    {
+        var rule = FindEnclosing(item.StyleRules, r => r.ItemRange.Start, position);
+        if (rule is null)
+            return new NodeContext.StyleRuleKey(new HashSet<string>());
+
+        var ruleKeys = rule.Fields.Select(f => f.Name).ToHashSet(StringComparer.Ordinal);
+        var owner = rule.Fields.LastOrDefault(f => f.KeyRange.Start.Line <= position.Line);
+        if (owner is null)
+            return new NodeContext.StyleRuleKey(ruleKeys);
+
+        var insideValue = position.Line == owner.KeyRange.Start.Line
+            ? !IsBefore(position, owner.KeyRange.End) && !owner.KeyRange.Contains(position)
+            : position.Character > rule.ItemRange.Start.Character;
+
+        if (!insideValue)
+            return new NodeContext.StyleRuleKey(ruleKeys);
+
+        switch (owner.Name)
+        {
+            case "class":
+                return new NodeContext.StyleSelector(
+                    rule.Selector.Select(f => f.Name).ToHashSet(StringComparer.Ordinal),
+                    EntryAt(rule.Selector, position));
+
+            case "properties":
+                var property = EntryAt(rule.Properties, position);
+                if (property is not null && (property.KeyRange.Start.Line == position.Line || IsInScalarSequence(property, position)))
+                    return new NodeContext.StylePropertyValue(rule.Control, property.Name);
+
+                return new NodeContext.StylePropertyKey(rule.Control, rule.Properties.Select(f => f.Name).ToHashSet(StringComparer.Ordinal));
+
+            default:
+                return new NodeContext.None();
+        }
+    }
+
+    /// <summary>
+    /// The entry the cursor is on: the last one starting at or before it on the cursor's line
+    /// (a flow mapping holds several per line), or one whose list value spans the cursor's line.
+    /// </summary>
+    private static FieldSpan? EntryAt(IReadOnlyList<FieldSpan> entries, LspPosition position) =>
+        entries.LastOrDefault(e => e.KeyRange.Start.Line == position.Line && !IsBefore(position, e.KeyRange.Start))
+        ?? entries.FirstOrDefault(e => IsInScalarSequence(e, position));
+
+    /// <summary>Within the range's lines - from its start column on the first line, anywhere after.</summary>
+    private static bool IsWithinLines(LspRange? range, LspPosition position) =>
+        range is { } r &&
+        position.Line >= r.Start.Line && position.Line <= r.End.Line &&
+        (position.Line != r.Start.Line || !IsBefore(position, r.Start));
 
     private static NodeContext ResolveWithinComponent(string prototypeTypeKey, ComponentItem component, LspPosition position)
     {
@@ -57,7 +140,7 @@ public static class NodeContextResolver
 
         foreach (var field in component.Fields)
         {
-            if (IsOnValue(field.ValueRange, position) || field.KeyRange.Contains(position))
+            if (IsOnValue(field.ValueRange, position) || IsInScalarSequence(field, position) || field.KeyRange.Contains(position))
                 return new NodeContext.ComponentFieldValue(prototypeTypeKey, componentName ?? string.Empty, field.Name);
         }
 
@@ -100,6 +183,13 @@ public static class NodeContextResolver
     /// </summary>
     private static bool IsOnValue(LspRange? range, LspPosition position) =>
         range is { } r && position.Line == r.Start.Line && !IsBefore(position, r.Start);
+
+    // Line-based like IsOnValue: any line from the sequence's first item to its last, at or
+    // after the column the items start at (so a dedented new key after the list isn't caught).
+    private static bool IsInScalarSequence(FieldSpan field, LspPosition position) =>
+        field.ScalarSequenceRange is { } r &&
+        position.Line >= r.Start.Line && position.Line <= r.End.Line &&
+        position.Character >= r.Start.Character;
 
     private static IReadOnlySet<string> ExistingNames(IReadOnlyList<FieldSpan> fields) =>
         fields.Select(f => f.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);

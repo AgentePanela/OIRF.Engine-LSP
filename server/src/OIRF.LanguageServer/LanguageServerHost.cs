@@ -73,7 +73,7 @@ public static class LanguageServerHost
 
             var diagnostics = IsInfoYaml(path)
                 ? InfoYamlValidator.Validate(text, Path.GetDirectoryName(path)!).ToList()
-                : PrototypeValidator.Validate(text, manager.Schema).ToList();
+                : PrototypeValidator.Validate(text, manager.Schema, manager.PrototypeIds).ToList();
             textDocument.PublishDiagnostics(new PublishDiagnosticsParams
             {
                 Uri = uri,
@@ -219,6 +219,8 @@ public static class LanguageServerHost
                     new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/*.cs" },
                     new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Textures/**" },
                     new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Shaders/**" },
+                    new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Audios/**" },
+                    new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Fonts/**" },
                     // Feeds PrototypeIdIndex (see EngineWorkspaceManager) so ProtoId<T> completion
                     // sees ids authored in files that aren't the one currently open.
                     new OmniSharp.Extensions.LanguageServer.Protocol.Models.FileSystemWatcher { GlobPattern = "**/Prototypes/**" }),

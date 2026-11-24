@@ -15,7 +15,7 @@ public static class HoverHandler
     public static Hover? Handle(string text, LspPosition position, EngineSchema schema)
     {
         var document = PrototypeYamlParser.Parse(text);
-        var context = NodeContextResolver.Resolve(document, position);
+        var context = NodeContextResolver.Resolve(document, position, schema.IsStylePrototype);
 
         var markdown = context switch
         {
@@ -32,6 +32,12 @@ public static class HoverHandler
             NodeContext.ComponentFieldValue ctx =>
                 RenderField(schema.ResolveComponent(ctx.ComponentName)?.Component
                     .Members.FirstOrDefault(m => string.Equals(m.Name, ctx.FieldName, StringComparison.OrdinalIgnoreCase))),
+
+            NodeContext.StylePropertyValue ctx =>
+                RenderStyleProperty(schema.ResolveStyleProperties(ctx.Control).FirstOrDefault(p => p.Name == ctx.PropertyName)),
+
+            NodeContext.StyleSelector { Entry: { Name: "control", ScalarValue: { } control } } =>
+                RenderControl(schema, control),
 
             _ => null,
         };
@@ -78,6 +84,33 @@ public static class HoverHandler
             return null;
 
         return Compose(member.Signature, badge: null, member.DocMarkdown);
+    }
+
+    private static string? RenderStyleProperty(StylePropertyInfo? property)
+    {
+        if (property is null)
+            return null;
+
+        return Compose(property.Signature, badge: null, property.DocMarkdown);
+    }
+
+    // A class name shows that control; an alias lists every control that adds it.
+    private static string? RenderControl(EngineSchema schema, string control)
+    {
+        var matches = schema.MatchStyleControl(control)
+            .Where(c => string.Equals(c.Name, control, StringComparison.OrdinalIgnoreCase) ||
+                        c.Aliases.Contains(control, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matches.Count == 0)
+            return null;
+
+        var exact = matches.FirstOrDefault(c => string.Equals(c.Name, control, StringComparison.OrdinalIgnoreCase));
+        if (exact is not null)
+            return Compose(exact.Signature, badge: null, exact.ClassDocMarkdown);
+
+        var names = string.Join(", ", matches.Select(c => $"`{c.Name}`"));
+        return Compose(string.Join("\n", matches.Select(c => c.Signature)), $"*alias of {names} (and their subclasses)*", docMarkdown: null);
     }
 
     private static string Compose(string signature, string? badge, string? docMarkdown)

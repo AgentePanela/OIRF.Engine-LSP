@@ -5,7 +5,35 @@ public enum AssetKind
     /// <summary>Atlas frame key, e.g. "Entities/Player/idle-0" (SpriteComponent.Key).</summary>
     Sprite,
 
+    /// <summary>
+    /// A shader reference (<c>ShaderPath</c>/<c>[ShaderKey]</c>, e.g. SpriteComponent.Shader).
+    /// Since engine 0.5 this is a <c>ShaderPrototype</c> id (<c>type: shader</c>); on older engines
+    /// with no ShaderPrototype it's the bare .fx file name. Which one is offered is decided at
+    /// completion time against the schema, see CompletionHandler.
+    /// </summary>
     Shader,
+
+    /// <summary>Bare .fx file name under a "Shaders" root, no extension (ShaderPrototype.Path).</summary>
+    ShaderFile,
+
+    /// <summary>
+    /// Audio key: path of an .ogg relative to an "Audios" resource root, no extension, e.g.
+    /// "Mobs/Voice/speak_1" (<c>[AudioKey]</c>, mirrors SharedAudioManifest).
+    /// </summary>
+    Audio,
+
+    /// <summary>
+    /// A <c>SoundSpecifier</c>: either a bare audio key, or a map with exactly one of
+    /// <c>path</c> (audio key) / <c>collection</c> (soundCollection id) plus optional
+    /// <c>volume</c>/<c>pitch</c> (mirrors SoundSpecifier.FromYaml).
+    /// </summary>
+    Sound,
+
+    /// <summary>
+    /// A .ttf under a "Fonts" root: relative path without extension, e.g. "Minecraft/macs-minecraft"
+    /// (FontFamilyPrototype.Regular/Bold/..., resolved by FontManager against ResFile.Relative).
+    /// </summary>
+    Font,
 
     /// <summary>
     /// Bare animation-definition key from an info.yml `id` (no "-N" frame suffix), e.g.
@@ -91,6 +119,38 @@ public sealed record ComponentTypeInfo(
     SymbolLocation? Location);
 
 /// <summary>
+/// One <c>[StyleField("name", default)]</c> backing field on a UI control - a key a
+/// <c>type: style</c> rule may set under <c>properties:</c>. Names are matched case-sensitively,
+/// exactly like the engine (<c>StyleRule.Properties</c> is a plain <c>Dictionary</c>).
+/// </summary>
+public sealed record StylePropertyInfo(
+    string Name,
+    string ClrTypeDisplay,
+    string Signature,
+    string? DefaultDisplay,
+    string? DocMarkdown,
+    SymbolLocation? Location,
+    IReadOnlyList<string>? ValueChoices,
+    AssetClassification? Asset,
+    ProtoIdClassification? ProtoId);
+
+/// <summary>
+/// A class deriving from (or being) <c>Engine.Client.UI.Control</c>. <see cref="Aliases"/> are the
+/// extra names it adds with <c>StyleAliasses.Add("...")</c> (inherited by subclasses at runtime,
+/// since they're added in a constructor); <see cref="StyleProperties"/> are only the ones declared
+/// on this class - see <see cref="EngineSchema.ResolveStyleProperties"/> for the inherited set.
+/// </summary>
+public sealed record UiControlInfo(
+    string Name,
+    string ClrTypeName,
+    string? BaseClrTypeName,
+    IReadOnlyList<string> Aliases,
+    IReadOnlyList<StylePropertyInfo> StyleProperties,
+    string Signature,
+    string? ClassDocMarkdown,
+    SymbolLocation? Location);
+
+/// <summary>
 /// The result of resolving a <c>type:</c> value against a component's registered
 /// <see cref="ComponentTypeInfo.Name"/> or, failing that, its raw <see cref="ComponentTypeInfo.ClassName"/>.
 /// </summary>
@@ -153,6 +213,70 @@ public sealed class EngineSchema
             return new ComponentResolution(byClassName, MatchedByClassName: true);
 
         return null;
+    }
+
+    public const string StylePrototypeFqn = "Engine.Client.UI.StylePrototype";
+
+    /// <summary>Whether <paramref name="typeKey"/> is the engine's UI stylesheet prototype.</summary>
+    public bool IsStylePrototype(string typeKey) =>
+        PrototypesByTypeKey.GetValueOrDefault(typeKey)?.ClrTypeName == StylePrototypeFqn;
+
+    /// <summary>The keys StyleClass reads from a rule's <c>class:</c> (case-sensitive, like the engine).</summary>
+    public static readonly string[] StyleSelectorKeys = ["control", "styleClass", "pseudoClass", "id"];
+
+    /// <summary>The keys StyleRule reads from each <c>rules:</c> entry.</summary>
+    public static readonly string[] StyleRuleKeys = ["class", "properties"];
+
+    /// <summary>UI controls keyed by CLR full name.</summary>
+    public IReadOnlyDictionary<string, UiControlInfo> UiControls { get; init; } = new Dictionary<string, UiControlInfo>();
+
+    /// <summary>Every literal passed to <c>PseudoClasses.Add("...")</c> anywhere in the workspace.</summary>
+    public IReadOnlyList<string> PseudoClasses { get; init; } = [];
+
+    /// <summary>The control and its base classes, most-derived first.</summary>
+    public IEnumerable<UiControlInfo> ControlChain(UiControlInfo control)
+    {
+        for (UiControlInfo? current = control; current is not null;
+             current = current.BaseClrTypeName is { } b ? UiControls.GetValueOrDefault(b) : null)
+        {
+            yield return current;
+        }
+    }
+
+    /// <summary>Every name a <c>control:</c> selector can use: class names plus aliases.</summary>
+    public IEnumerable<string> StyleControlNames =>
+        UiControls.Values.Select(c => c.Name)
+            .Concat(UiControls.Values.SelectMany(c => c.Aliases))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The controls a <c>control:</c> selector matches, mirroring StyleClass.MatchesControlType:
+    /// the class name of the control or of any of its bases, or an alias the control or a base
+    /// added - all case-insensitive.
+    /// </summary>
+    public IEnumerable<UiControlInfo> MatchStyleControl(string control) =>
+        UiControls.Values.Where(c => ControlChain(c).Any(t =>
+            string.Equals(t.Name, control, StringComparison.OrdinalIgnoreCase) ||
+            t.Aliases.Contains(control, StringComparer.OrdinalIgnoreCase)));
+
+    /// <summary>
+    /// The style properties a rule can set: for a <c>control:</c> selector, everything declared on
+    /// the matched controls and their bases; for a rule with no control (universal), every
+    /// property of every control. The first declaration of each name wins.
+    /// </summary>
+    public IReadOnlyList<StylePropertyInfo> ResolveStyleProperties(string? control)
+    {
+        var controls = string.IsNullOrEmpty(control) ? UiControls.Values : MatchStyleControl(control);
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<StylePropertyInfo>();
+        foreach (var property in controls.SelectMany(ControlChain).SelectMany(c => c.StyleProperties))
+        {
+            if (seen.Add(property.Name))
+                result.Add(property);
+        }
+
+        return result;
     }
 
     private static IReadOnlyDictionary<string, ComponentTypeInfo> BuildByClassName(
