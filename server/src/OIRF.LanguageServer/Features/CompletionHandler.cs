@@ -8,7 +8,7 @@ namespace OIRF.LanguageServer.Features;
 
 public static class CompletionHandler
 {
-    public static IEnumerable<CompletionItem> Handle(string text, LspPosition position, EngineSchema schema, ResourceIndex resources, PrototypeIdIndex prototypeIds)
+    public static IEnumerable<CompletionItem> Handle(string text, LspPosition position, EngineSchema schema, ResourceIndex resources, PrototypeIdIndex prototypeIds, string? documentPath = null)
     {
         var document = PrototypeYamlParser.Parse(text);
         var context = NodeContextResolver.Resolve(document, position, schema.IsStylePrototype);
@@ -47,8 +47,8 @@ public static class CompletionHandler
             // Every id of the same prototype type: the workspace-wide index (other files, as last
             // saved) plus this document's own items (possibly unsaved), minus the item itself and
             // parents already listed.
-            NodeContext.ParentValue ctx => KnownIds(ctx.PrototypeTypeKey, document, prototypeIds)
-                .Where(id => !string.Equals(id, ctx.CurrentItemId, StringComparison.Ordinal) && !ctx.ExistingParents.Contains(id))
+            NodeContext.ParentValue ctx => new PrototypeLookup(document, prototypeIds, documentPath).Ids(ctx.PrototypeTypeKey)
+                .Where(id => !string.Equals(id, ctx.CurrentItemId, StringComparison.OrdinalIgnoreCase) && !ctx.ExistingParents.Contains(id))
                 .Select(id => new CompletionItem { Label = id, Kind = CompletionItemKind.Reference }),
 
             NodeContext.StyleRuleKey ctx => EngineSchema.StyleRuleKeys
@@ -69,16 +69,6 @@ public static class CompletionHandler
             _ => [],
         };
     }
-
-    /// <summary>Every id of <paramref name="typeKey"/>: workspace index plus this document's own items.</summary>
-    public static IEnumerable<string> KnownIds(string typeKey, PrototypeDocument document, PrototypeIdIndex prototypeIds) =>
-        prototypeIds.Get(typeKey)
-            .Concat(document.Items
-                .Where(i => string.Equals(i.TypeValue, typeKey, StringComparison.OrdinalIgnoreCase))
-                .Select(i => i.IdValue)
-                .OfType<string>()
-                .Where(id => id.Length > 0))
-            .Distinct(StringComparer.Ordinal);
 
     private static IEnumerable<CompletionItem> StyleSelectorCompletion(NodeContext.StyleSelector ctx, EngineSchema schema, string linePrefix)
     {
@@ -231,9 +221,9 @@ public static class CompletionHandler
         }
     }
 
-    private const string ShaderPrototypeFqn = "Engine.Shared.Graphics.ShaderPrototype";
-    private const string SoundCollectionPrototypeFqn = "Engine.Shared.Audio.SoundCollectionPrototype";
-    private const string FontFamilyPrototypeFqn = "Engine.Client.Graphics.Fonts.FontFamilyPrototype";
+    private const string ShaderPrototypeFqn = EngineSchema.ShaderPrototypeFqn;
+    private const string SoundCollectionPrototypeFqn = EngineSchema.SoundCollectionPrototypeFqn;
+    private const string FontFamilyPrototypeFqn = EngineSchema.FontFamilyPrototypeFqn;
 
     /// <summary>The keys SoundSpecifier.FromYaml reads from a map-form sound.</summary>
     public static readonly string[] SoundMapKeys = ["path", "collection", "volume", "pitch"];

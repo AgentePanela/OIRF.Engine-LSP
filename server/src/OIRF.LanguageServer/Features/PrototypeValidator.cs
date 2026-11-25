@@ -1,3 +1,4 @@
+using OIRF.LanguageServer.Assets;
 using OIRF.LanguageServer.Schema;
 using OIRF.LanguageServer.Yaml;
 using OmniSharp.Extensions.LanguageServer.Protocol.Models;
@@ -13,10 +14,17 @@ namespace OIRF.LanguageServer.Features;
 public static class PrototypeValidator
 {
     /// <param name="prototypeIds">
-    /// Workspace-wide ids, for the missing-parent check. Null (or not built yet) skips that check
-    /// rather than flagging every parent defined in another file.
+    /// Workspace-wide ids, for the parent/inheritance/unknown-id checks. Null (or not built yet)
+    /// skips them rather than flagging every id defined in another file.
     /// </param>
-    public static IEnumerable<Diagnostic> Validate(string text, EngineSchema schema, PrototypeIdIndex? prototypeIds = null)
+    /// <param name="resources">Indexed asset files, for the missing-asset check. Null skips it.</param>
+    /// <param name="documentPath">This document's path, so its own on-disk index entries are ignored.</param>
+    public static IEnumerable<Diagnostic> Validate(
+        string text,
+        EngineSchema schema,
+        PrototypeIdIndex? prototypeIds = null,
+        ResourceIndex? resources = null,
+        string? documentPath = null)
     {
         var document = PrototypeYamlParser.Parse(text);
 
@@ -29,14 +37,44 @@ public static class PrototypeValidator
             yield break;
         }
 
+        // Null when the cross-file checks can't run yet: no index, or nothing indexed.
+        var lookup = new PrototypeLookup(document, prototypeIds ?? PrototypeIdIndex.Empty, documentPath);
+        var crossFile = prototypeIds is null || lookup.IsEmpty ? null : lookup;
+
         foreach (var item in document.Items)
         {
-            foreach (var diagnostic in ValidateItem(item, schema, document, prototypeIds))
+            foreach (var diagnostic in ValidateItem(item, schema, crossFile, resources))
                 yield return diagnostic;
+        }
+
+        if (crossFile is null)
+            yield break;
+
+        foreach (var diagnostic in ValidateFieldReferences(document, schema, crossFile, resources))
+            yield return diagnostic;
+    }
+
+    /// <summary>
+    /// A field naming a prototype id that doesn't exist. Only a Warning: the engine stores a
+    /// ProtoId&lt;T&gt; as a plain string on load and only fails when it's indexed at runtime. A type
+    /// with no known ids at all is skipped - its prototypes most likely just aren't in the workspace.
+    /// </summary>
+    private static IEnumerable<Diagnostic> ValidateFieldReferences(PrototypeDocument document, EngineSchema schema, PrototypeLookup lookup, ResourceIndex? resources)
+    {
+        foreach (var reference in PrototypeReferences.Collect(document, schema))
+        {
+            if (reference.Kind != PrototypeReferenceKind.Field || !lookup.HasAny(reference.TypeKey) || lookup.Exists(reference.TypeKey, reference.Id))
+                continue;
+
+            if (reference.AllowsLooseFont && resources is not null && IsKnownFont(resources, reference.Id))
+                continue;
+
+            yield return Warning(reference.Range, "unknown-proto-id",
+                $"No '{reference.TypeKey}' prototype with id '{reference.Id}'. The engine doesn't check this on load, it fails when the id is used.");
         }
     }
 
-    private static IEnumerable<Diagnostic> ValidateItem(PrototypeItem item, EngineSchema schema, PrototypeDocument document, PrototypeIdIndex? prototypeIds)
+    private static IEnumerable<Diagnostic> ValidateItem(PrototypeItem item, EngineSchema schema, PrototypeLookup? lookup, ResourceIndex? resources)
     {
         if (item.TypeValue is null || item.TypeValueRange is null)
         {
@@ -53,15 +91,16 @@ public static class PrototypeValidator
             yield break;
         }
 
-        // PrototypeManager.GetMergedFields throws for this. Parents resolve within the same
-        // prototype type, case-sensitively (the raw-prototype buckets are plain dictionaries).
-        if (prototypeIds is { IdsByTypeKey.Count: > 0 } && item.Parents.Count > 0)
+        // PrototypeManager.GetMergedFields throws for both. Parents resolve within the same
+        // prototype type, case-insensitively (its raw-prototype buckets use OrdinalIgnoreCase).
+        if (lookup is not null)
         {
-            var known = CompletionHandler.KnownIds(item.TypeValue, document, prototypeIds).ToHashSet(StringComparer.Ordinal);
             foreach (var (parentId, range) in item.Parents)
             {
-                if (!known.Contains(parentId))
+                if (!lookup.Exists(item.TypeValue, parentId))
                     yield return Error(range, "missing-parent", $"Prototype '{item.IdValue}' references missing parent '{parentId}'.");
+                else if (item.IdValue is { Length: > 0 } selfId && Reaches(lookup, item.TypeValue, parentId, selfId))
+                    yield return Error(range, "cyclic-parent", $"Cyclic inheritance: '{parentId}' inherits back from '{selfId}'.");
             }
         }
 
@@ -71,26 +110,26 @@ public static class PrototypeValidator
                 yield return diagnostic;
         }
 
-        // M1 stopgap: prototype inheritance merges parent fields before the engine's own
-        // required-field check runs, so a child validly omitting a field its parent supplies
-        // must not be flagged. Full parent-chain resolution is a documented fast-follow (see
-        // plan) - for now, only run this check on prototypes with no `parent:` at all.
-        var hasParent = item.ParentValueRange is not null;
-        if (!hasParent)
+        // PrototypeManager.PopulateInstance checks required fields against the merged fields -
+        // the item's own plus everything its parents (recursively) set - and it does so for
+        // abstract prototypes too. Without the index, or with a parent that can't be resolved,
+        // the merged set isn't known, so the check is skipped rather than guessed.
+        var setFields = item.Parents.Count == 0
+            ? item.SetFieldNames.ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : lookup is null ? null : MergedFieldNames(lookup, item);
+
+        if (setFields is not null)
         {
             foreach (var field in proto.DataFields)
             {
-                if (field.IsMeta || !field.Required)
+                if (field.IsMeta || !field.Required || setFields.Contains(field.YamlName))
                     continue;
 
-                var present = item.TopLevelFields.Any(f => string.Equals(f.Name, field.YamlName, StringComparison.OrdinalIgnoreCase));
-                if (!present)
-                {
-                    yield return Error(
-                        item.ItemRange,
-                        "missing-req-field",
-                        $"Missing required field '{field.YamlName}' on prototype '{item.IdValue}'.");
-                }
+                var where = item.Parents.Count == 0 ? "" : " (not set here or by any parent)";
+                yield return Error(
+                    item.ItemRange,
+                    "missing-req-field",
+                    $"Missing required field '{field.YamlName}' on prototype '{item.IdValue}'{where}.");
             }
         }
 
@@ -103,18 +142,68 @@ public static class PrototypeValidator
                 continue;
             }
 
-            foreach (var diagnostic in ValidateValue(field, dataField.Asset))
+            foreach (var diagnostic in ValidateValue(field, dataField.Asset, schema, resources))
                 yield return diagnostic;
         }
 
         foreach (var component in item.Components)
         {
-            foreach (var diagnostic in ValidateComponent(component, schema))
+            foreach (var diagnostic in ValidateComponent(component, schema, resources))
                 yield return diagnostic;
         }
     }
 
-    private static IEnumerable<Diagnostic> ValidateComponent(ComponentItem component, EngineSchema schema)
+    /// <summary>
+    /// Every field name the item ends up with after inheritance, or null when some ancestor
+    /// can't be resolved (its own missing-parent error covers that) or the chain loops.
+    /// </summary>
+    private static HashSet<string>? MergedFieldNames(PrototypeLookup lookup, PrototypeItem item)
+    {
+        var result = item.SetFieldNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (item.IdValue is { Length: > 0 } selfId)
+            visited.Add(selfId);
+
+        var pending = new Stack<string>(item.Parents.Select(p => p.Id));
+        while (pending.Count > 0)
+        {
+            var id = pending.Pop();
+            if (!visited.Add(id))
+                continue;
+
+            if (lookup.Find(item.TypeValue!, id) is not { } entry)
+                return null;
+
+            result.UnionWith(entry.SetFieldNames);
+            foreach (var parent in entry.Parents)
+                pending.Push(parent);
+        }
+
+        return result;
+    }
+
+    // Whether following parents up from `fromId` arrives back at `targetId`.
+    private static bool Reaches(PrototypeLookup lookup, string typeKey, string fromId, string targetId)
+    {
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<string>([fromId]);
+        while (pending.Count > 0)
+        {
+            var id = pending.Pop();
+            if (string.Equals(id, targetId, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (!visited.Add(id) || lookup.Find(typeKey, id) is not { } entry)
+                continue;
+
+            foreach (var parent in entry.Parents)
+                pending.Push(parent);
+        }
+
+        return false;
+    }
+
+    private static IEnumerable<Diagnostic> ValidateComponent(ComponentItem component, EngineSchema schema, ResourceIndex? resources)
     {
         if (component.TypeValue is null || component.TypeValueRange is null)
         {
@@ -154,7 +243,7 @@ public static class PrototypeValidator
                 continue;
             }
 
-            foreach (var diagnostic in ValidateValue(field, member.Asset))
+            foreach (var diagnostic in ValidateValue(field, member.Asset, schema, resources))
                 yield return diagnostic;
         }
     }
@@ -233,14 +322,110 @@ public static class PrototypeValidator
         }
     }
 
+    private static IEnumerable<Diagnostic> ValidateValue(FieldSpan field, AssetClassification? asset, EngineSchema schema, ResourceIndex? resources)
+    {
+        if (asset is null)
+            return [];
+
+        var sound = asset.Kind == AssetKind.Sound && field.MappingKeys is not null ? ValidateSoundMap(field) : [];
+        return resources is null ? sound : sound.Concat(ValidateAssetFiles(field, asset, schema, resources));
+    }
+
+    /// <summary>
+    /// An asset value naming a file that isn't in any resource folder. Only for fields known for
+    /// sure to hold one (HighConfidence: a marker attribute or dedicated type, not a name guess),
+    /// and only once that kind of file was found at all. A Warning: nothing fails on load (a
+    /// missing texture, for one, logs "Sprite ... does not exist!" and draws a placeholder).
+    /// </summary>
+    private static IEnumerable<Diagnostic> ValidateAssetFiles(FieldSpan field, AssetClassification asset, EngineSchema schema, ResourceIndex resources)
+    {
+        if (!asset.HighConfidence)
+            yield break;
+
+        var kind = asset.Kind;
+        var values = field.Scalars;
+
+        switch (kind)
+        {
+            // Engine 0.5+: a shader id, checked as a prototype reference instead.
+            case AssetKind.Shader when schema.TypeKeyOf(EngineSchema.ShaderPrototypeFqn) is not null:
+                yield break;
+
+            // A sound is a bare audio key, or a map whose "path:" is one.
+            case AssetKind.Sound:
+                kind = AssetKind.Audio;
+                if (field.Entries is { } entries)
+                {
+                    values = entries
+                        .Where(e => string.Equals(e.Name, "path", StringComparison.OrdinalIgnoreCase))
+                        .SelectMany(e => e.Scalars)
+                        .ToList();
+                }
+                break;
+        }
+
+        // AssetManager.GetSprite also takes a bare animation key and shows its first frame.
+        var keys = kind == AssetKind.Sprite
+            ? resources.SpriteKeys.Concat(resources.AnimationKeys).ToList()
+            : resources.Get(kind);
+
+        if (keys.Count == 0)
+            yield break;
+
+        foreach (var (value, range) in values)
+        {
+            // Fonts are looked up ignoring case (FontManager); the atlas, animations and the audio
+            // manifest are plain dictionaries, so there a wrong case is as missing as a wrong name.
+            if (kind == AssetKind.Font ? IsKnownFont(resources, value) : keys.Contains(value, StringComparer.Ordinal))
+                continue;
+
+            if (kind == AssetKind.Sprite && IsFrameOfOpenEndedAnimation(resources, value))
+                continue;
+
+            var caseMatch = kind == AssetKind.Font ? null : keys.FirstOrDefault(k => string.Equals(k, value, StringComparison.OrdinalIgnoreCase));
+            var message = caseMatch is not null
+                ? $"Asset names are case-sensitive: no {AssetName(kind)} '{value}', did you mean '{caseMatch}'?"
+                : $"No {AssetName(kind)} '{value}' in any {string.Join("/", asset.ResourceRoots)} folder.";
+
+            yield return Warning(range, "missing-asset", message);
+        }
+    }
+
+    private static string AssetName(AssetKind kind) => kind switch
+    {
+        AssetKind.Sprite => "texture",
+        AssetKind.Animation => "animation",
+        AssetKind.Shader or AssetKind.ShaderFile => "shader file",
+        AssetKind.Audio or AssetKind.Sound => "audio file",
+        AssetKind.Font => "font file",
+        _ => "file",
+    };
+
+    // "walk-3" of a spritesheet animation "walk" whose frame count the indexer couldn't determine.
+    private static bool IsFrameOfOpenEndedAnimation(ResourceIndex resources, string value)
+    {
+        var dash = value.LastIndexOf('-');
+        if (dash <= 0 || dash == value.Length - 1 || value.AsSpan(dash + 1).ContainsAnyExceptInRange('0', '9'))
+            return false;
+
+        var animKey = value[..dash];
+        return resources.OpenEndedAnimationKeys.Contains(animKey, StringComparer.Ordinal);
+    }
+
+    // FontManager: a key relative to a Fonts folder, or else just the file name of a .ttf.
+    private static bool IsKnownFont(ResourceIndex resources, string value) =>
+        resources.FontKeys.Any(k =>
+            string.Equals(k, value, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(k[(k.LastIndexOf('/') + 1)..], value, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>
     /// Map-form SoundSpecifier ("{ path: ... }" / "{ collection: ... }"). The two Errors mirror the
     /// PrototypeLoadExceptions thrown by SoundSpecifier.FromYaml; an unknown key is only a Warning,
     /// since FromYaml silently ignores it (so a typo like "colection" just loses the value).
     /// </summary>
-    private static IEnumerable<Diagnostic> ValidateValue(FieldSpan field, AssetClassification? asset)
+    private static IEnumerable<Diagnostic> ValidateSoundMap(FieldSpan field)
     {
-        if (asset is not { Kind: AssetKind.Sound } || field.MappingKeys is not { } keys)
+        if (field.MappingKeys is not { } keys)
             yield break;
 
         bool Has(string name) => keys.Any(k => string.Equals(k.Key, name, StringComparison.OrdinalIgnoreCase));

@@ -16,6 +16,15 @@ public sealed class FieldSpan
 
     /// <summary>Set when the value is a mapping: its keys, with their ranges, in document order.</summary>
     public IReadOnlyList<(string Key, LspRange Range)>? MappingKeys { get; init; }
+
+    /// <summary>Set when the value is a mapping: its entries, each a field of its own.</summary>
+    public IReadOnlyList<FieldSpan>? Entries { get; init; }
+
+    /// <summary>
+    /// The value's scalar text(s): the scalar itself, or every scalar item of a sequence. Ranges
+    /// cover the text only, without the quotes of a quoted scalar (what a rename replaces).
+    /// </summary>
+    public IReadOnlyList<(string Value, LspRange Range)> Scalars { get; init; } = [];
 }
 
 /// <summary>One entry of a prototype item's <c>components:</c> list.</summary>
@@ -79,6 +88,15 @@ public sealed class PrototypeItem
     public required IReadOnlyList<FieldSpan> TopLevelFields { get; init; }
     public LspRange? ComponentsListRange { get; init; }
     public required IReadOnlyList<ComponentItem> Components { get; init; }
+
+    /// <summary>
+    /// Every top-level key this item sets itself, <c>components</c> included (the parser keeps
+    /// that list apart from <see cref="TopLevelFields"/>). What it passes on to its children.
+    /// </summary>
+    public IEnumerable<string> SetFieldNames =>
+        ComponentsListRange is null
+            ? TopLevelFields.Select(f => f.Name)
+            : TopLevelFields.Select(f => f.Name).Append("components");
 }
 
 /// <summary>

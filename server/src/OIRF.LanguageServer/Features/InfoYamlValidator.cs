@@ -153,8 +153,10 @@ public static class InfoYamlValidator
         if (!TryGetRequiredInt(map, "frameHeight", out var frameHeightDiagnostic))
             yield return frameHeightDiagnostic!;
 
-        if (!TryGetRequiredInt(map, "frameCount", out var frameCountDiagnostic))
-            yield return frameCountDiagnostic!;
+        // frameCount is optional: omitted, the engine uses every cell of the sheet.
+        if (TryGetScalar(map, "frameCount", out var frameCountNode)
+            && !int.TryParse(frameCountNode.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out _))
+            yield return Error(ToRange(frameCountNode), "bad-value", "'frameCount' must be a whole number.");
 
         if (MissingTexture(infoYmlDirectory, fileName) is { } missing)
             yield return Warning(ToRange(filesNode), "missing-texture", missing);

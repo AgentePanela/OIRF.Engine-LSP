@@ -215,7 +215,14 @@ public sealed class EngineSchema
         return null;
     }
 
+    /// <summary>The registered <c>type:</c> key of the prototype class <paramref name="clrTypeName"/>, if any.</summary>
+    public string? TypeKeyOf(string clrTypeName) =>
+        PrototypesByTypeKey.Values.FirstOrDefault(p => p.ClrTypeName == clrTypeName)?.TypeKey;
+
     public const string StylePrototypeFqn = "Engine.Client.UI.StylePrototype";
+    public const string ShaderPrototypeFqn = "Engine.Shared.Graphics.ShaderPrototype";
+    public const string SoundCollectionPrototypeFqn = "Engine.Shared.Audio.SoundCollectionPrototype";
+    public const string FontFamilyPrototypeFqn = "Engine.Client.Graphics.Fonts.FontFamilyPrototype";
 
     /// <summary>Whether <paramref name="typeKey"/> is the engine's UI stylesheet prototype.</summary>
     public bool IsStylePrototype(string typeKey) =>

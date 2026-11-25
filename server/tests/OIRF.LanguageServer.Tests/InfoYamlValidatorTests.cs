@@ -58,14 +58,25 @@ public class InfoYamlValidatorTests : IDisposable
     }
 
     [Fact]
-    public void Spritesheet_missing_frame_count_is_error()
+    public void Spritesheet_without_frame_count_is_valid()
     {
         var text = "animations:\n  - id: walk\n    spritesheet: true\n    files: sheet\n    frameWidth: 1\n    frameHeight: 1\n";
         CreatePng("sheet");
 
         var diagnostics = InfoYamlValidator.Validate(text, _dir).ToList();
 
-        Assert.Contains(diagnostics, d => d.Severity == DiagnosticSeverity.Error && d.Message.Contains("Missing required field 'frameCount'"));
+        Assert.Empty(diagnostics);
+    }
+
+    [Fact]
+    public void Spritesheet_non_numeric_frame_count_is_error()
+    {
+        var text = "animations:\n  - id: walk\n    spritesheet: true\n    files: sheet\n    frameWidth: 1\n    frameHeight: 1\n    frameCount: many\n";
+        CreatePng("sheet");
+
+        var diagnostics = InfoYamlValidator.Validate(text, _dir).ToList();
+
+        Assert.Contains(diagnostics, d => d.Severity == DiagnosticSeverity.Error && d.Message.Contains("'frameCount' must be a whole number"));
     }
 
     [Fact]

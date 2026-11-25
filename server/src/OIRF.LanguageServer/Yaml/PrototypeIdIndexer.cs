@@ -13,6 +13,12 @@ public sealed class PrototypeIdIndex
 {
     public required IReadOnlyDictionary<string, IReadOnlyList<string>> IdsByTypeKey { get; init; }
 
+    /// <summary>Where each id is written, with what it inherits from and sets itself.</summary>
+    public IReadOnlyList<PrototypeDefinition> Definitions { get; init; } = [];
+
+    /// <summary>Every prototype file scanned (full paths), for workspace-wide references/rename.</summary>
+    public IReadOnlyList<string> Files { get; init; } = [];
+
     public static readonly PrototypeIdIndex Empty = new()
     {
         IdsByTypeKey = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase),
@@ -20,7 +26,25 @@ public sealed class PrototypeIdIndex
 
     public IReadOnlyList<string> Get(string typeKey) =>
         IdsByTypeKey.TryGetValue(typeKey, out var ids) ? ids : [];
+
+    /// <summary>
+    /// The definition of <paramref name="id"/>, matched case-insensitively like the engine's
+    /// PrototypeManager (its raw and typed buckets both use OrdinalIgnoreCase).
+    /// </summary>
+    public PrototypeDefinition? Find(string typeKey, string id) =>
+        Definitions.FirstOrDefault(d =>
+            string.Equals(d.TypeKey, typeKey, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(d.Id, id, StringComparison.OrdinalIgnoreCase));
 }
+
+/// <summary>One <c>id:</c> as last saved on disk.</summary>
+public sealed record PrototypeDefinition(
+    string TypeKey,
+    string Id,
+    string FilePath,
+    LspRange IdRange,
+    IReadOnlyList<string> Parents,
+    IReadOnlyList<string> SetFieldNames);
 
 /// <summary>
 /// Scans every "Prototypes"-named folder anywhere in the workspace (mirrors
@@ -32,7 +56,8 @@ public sealed class PrototypeIdIndex
 /// </summary>
 public static class PrototypeIdIndexer
 {
-    private static readonly string[] ExcludedDirNames = ["bin", "obj", "node_modules", ".git"];
+    // "publish": dotnet publish output, a copy of every resource and prototype file.
+    private static readonly string[] ExcludedDirNames = ["bin", "obj", "node_modules", ".git", "publish"];
 
     public static PrototypeIdIndex Build(IEnumerable<string> workspaceRoots, ILogger logger)
     {
@@ -41,9 +66,11 @@ public static class PrototypeIdIndexer
             FindPrototypesFolders(root, prototypeRoots);
 
         var idsByTypeKey = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var definitions = new List<PrototypeDefinition>();
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var prototypesRoot in prototypeRoots)
-            IndexPrototypesRoot(prototypesRoot, idsByTypeKey, logger);
+            IndexPrototypesRoot(prototypesRoot, idsByTypeKey, definitions, files, logger);
 
         return new PrototypeIdIndex
         {
@@ -51,6 +78,8 @@ public static class PrototypeIdIndexer
                 kv => kv.Key,
                 IReadOnlyList<string> (kv) => kv.Value,
                 StringComparer.OrdinalIgnoreCase),
+            Definitions = definitions,
+            Files = files.ToList(),
         };
     }
 
@@ -88,7 +117,12 @@ public static class PrototypeIdIndexer
         Walk(root);
     }
 
-    private static void IndexPrototypesRoot(string prototypesRoot, Dictionary<string, List<string>> idsByTypeKey, ILogger logger)
+    private static void IndexPrototypesRoot(
+        string prototypesRoot,
+        Dictionary<string, List<string>> idsByTypeKey,
+        List<PrototypeDefinition> definitions,
+        HashSet<string> seenFiles,
+        ILogger logger)
     {
         IEnumerable<string> files;
         try
@@ -103,6 +137,10 @@ public static class PrototypeIdIndexer
 
         foreach (var file in files)
         {
+            // A Prototypes folder nested in another one would be walked twice.
+            if (!seenFiles.Add(Path.GetFullPath(file)))
+                continue;
+
             string text;
             try
             {
@@ -128,6 +166,17 @@ public static class PrototypeIdIndexer
 
                 if (!ids.Contains(idValue, StringComparer.OrdinalIgnoreCase))
                     ids.Add(idValue);
+
+                if (item.IdValueRange is { } idRange)
+                {
+                    definitions.Add(new PrototypeDefinition(
+                        typeValue,
+                        idValue,
+                        Path.GetFullPath(file),
+                        idRange,
+                        item.Parents.Select(p => p.Id).ToList(),
+                        item.SetFieldNames.ToList()));
+                }
             }
         }
     }

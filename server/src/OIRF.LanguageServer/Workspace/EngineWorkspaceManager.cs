@@ -44,6 +44,12 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
     public event Action? SchemaChanged;
 
     /// <summary>
+    /// Raised after the resource and prototype-id indexes are rebuilt (an asset or prototype file
+    /// changed on disk): diagnostics that look at other files - parents, ids, assets - may change.
+    /// </summary>
+    public event Action? IndexesChanged;
+
+    /// <summary>
     /// Raised right before a schema rebuild begins (initial load, or a debounced rescan after a
     /// .cs save) - lets the client-facing status notification show "indexing" promptly instead
     /// of only ever reporting after-the-fact.
@@ -72,12 +78,15 @@ public sealed class EngineWorkspaceManager(ILoggerFactory loggerFactory) : IDisp
         RebuildResourceIndex();
         RebuildPrototypeIdIndex();
         DetermineIsEngineWorkspace();
+        // The schema rebuild above already re-validated, but before these indexes existed.
+        IndexesChanged?.Invoke();
 
         _csharpRescanQueue = new DebouncedRescanQueue(TimeSpan.FromMilliseconds(750), RebuildSchemaAsync);
         _resourceRescanQueue = new DebouncedRescanQueue(TimeSpan.FromMilliseconds(500), _ =>
         {
             RebuildResourceIndex();
             RebuildPrototypeIdIndex();
+            IndexesChanged?.Invoke();
             return Task.CompletedTask;
         });
     }

@@ -84,7 +84,7 @@ public static class PrototypeYamlParser
                     typeValue = (valueNode as YamlScalarNode)?.Value;
                     continue;
                 case "id":
-                    idValueRange = valueRange;
+                    idValueRange = valueNode is YamlScalarNode idScalar ? ScalarRange(idScalar) : valueRange;
                     idValue = (valueNode as YamlScalarNode)?.Value;
                     continue;
                 case "parent":
@@ -210,13 +210,28 @@ public static class PrototypeYamlParser
     /// <summary>A scalar's own value, or every non-empty scalar of a sequence.</summary>
     private static IEnumerable<(string, LspRange)> ScalarsOf(YamlNode node) => node switch
     {
-        YamlScalarNode { Value: { Length: > 0 } v } s => [(v, YamlPositionMapper.ToRange(s.Start, s.End))],
+        YamlScalarNode { Value: { Length: > 0 } v } s => [(v, ScalarRange(s))],
         YamlSequenceNode seq => seq.Children
             .OfType<YamlScalarNode>()
             .Where(s => s.Value is { Length: > 0 })
-            .Select(s => (s.Value!, YamlPositionMapper.ToRange(s.Start, s.End))),
+            .Select(s => (s.Value!, ScalarRange(s))),
         _ => [],
     };
+
+    // A quoted scalar's marks include its quotes; the text inside them is one column in from each.
+    private static LspRange ScalarRange(YamlScalarNode scalar)
+    {
+        var range = YamlPositionMapper.ToRange(scalar.Start, scalar.End);
+        if (scalar.Style is not (YamlDotNet.Core.ScalarStyle.SingleQuoted or YamlDotNet.Core.ScalarStyle.DoubleQuoted) ||
+            range.Start.Line != range.End.Line || range.End.Character - range.Start.Character < 2)
+        {
+            return range;
+        }
+
+        return new LspRange(
+            new LspPosition(range.Start.Line, range.Start.Character + 1),
+            new LspPosition(range.End.Line, range.End.Character - 1));
+    }
 
     private static Mark LaterOf(Mark a, Mark b) =>
         a.Line > b.Line || (a.Line == b.Line && a.Column >= b.Column) ? a : b;
@@ -300,6 +315,8 @@ public static class PrototypeYamlParser
                 .Select(k => (k.Value!, YamlPositionMapper.ToRange(k.Start, k.End)))
                 .ToList()
             : null,
+        Entries = valueNode is YamlMappingNode entries ? FieldsOf(entries) : null,
+        Scalars = ScalarsOf(valueNode).ToList(),
     };
 
     private static ComponentItem EmptyComponent(YamlNode node) => new()

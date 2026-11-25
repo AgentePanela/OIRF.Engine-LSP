@@ -37,10 +37,21 @@ asset-path completion) for the YAML **Prototype** files
 
 ## Changelog
 
-> Pre-release 1.0.0
+> 1.0.1
+- Fix 
+
+> 1.0.0
 - style prototypes surport
 - parent auto complete with all prototypes
 - font auto complete
 - audios auto complete
 - shader prototype suport
 - audio specifier support
+- go to definition on proto ids
+- hover on a prototype id shows its type, parents and more
+- find all references (shift + F12) and rename (F2)
+- search any prototype by id in the whole workspace (ctrl + T)
+- required fields now follow `parent` inheritance
+- warning for an id that doesn't exist in a ProtoId field (the engine only fails when it's used)
+- warning for a texture, animation, audio, shader or font file that doesn't exist
+- prototypes and resources inside build output folders are ignored

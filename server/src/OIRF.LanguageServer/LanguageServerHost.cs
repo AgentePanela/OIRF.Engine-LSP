@@ -73,7 +73,7 @@ public static class LanguageServerHost
 
             var diagnostics = IsInfoYaml(path)
                 ? InfoYamlValidator.Validate(text, Path.GetDirectoryName(path)!).ToList()
-                : PrototypeValidator.Validate(text, manager.Schema, manager.PrototypeIds).ToList();
+                : PrototypeValidator.Validate(text, manager.Schema, manager.PrototypeIds, manager.Resources, path).ToList();
             textDocument.PublishDiagnostics(new PublishDiagnosticsParams
             {
                 Uri = uri,
@@ -85,6 +85,41 @@ public static class LanguageServerHost
         {
             foreach (var (uri, text) in documentStore.Snapshot())
                 ValidateAndPublish(uri, text);
+        }
+
+        // Every prototype file, for references/rename/symbols: the editor's text for open ones
+        // (possibly unsaved), the saved text for the rest.
+        IReadOnlyList<(DocumentUri Uri, string Text)> PrototypeDocuments()
+        {
+            var result = new List<(DocumentUri, string)>();
+            var openPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var (uri, text) in documentStore.Snapshot())
+            {
+                var path = uri.GetFileSystemPath();
+                if (IsInfoYaml(path))
+                    continue;
+
+                openPaths.Add(Path.GetFullPath(path));
+                result.Add((uri, text));
+            }
+
+            foreach (var file in manager?.PrototypeIds.Files ?? [])
+            {
+                if (openPaths.Contains(file))
+                    continue;
+
+                try
+                {
+                    result.Add((DocumentUri.FromFileSystemPath(file), File.ReadAllText(file)));
+                }
+                catch (IOException)
+                {
+                    // deleted since indexed
+                }
+            }
+
+            return result;
         }
 
         // Pinned to the Func<..., Task> delegate type explicitly: the OmniSharp builder has both
@@ -147,7 +182,7 @@ public static class LanguageServerHost
                 var path = request.TextDocument.Uri.GetFileSystemPath();
                 var items = IsInfoYaml(path)
                     ? InfoYamlCompletionHandler.Handle(text, request.Position, Path.GetDirectoryName(path)!).ToList()
-                    : CompletionHandler.Handle(text, request.Position, manager.Schema, manager.Resources, manager.PrototypeIds).ToList();
+                    : CompletionHandler.Handle(text, request.Position, manager.Schema, manager.Resources, manager.PrototypeIds, path).ToList();
                 return Task.FromResult(new CompletionList(items));
             }
 
@@ -157,7 +192,7 @@ public static class LanguageServerHost
         Func<HoverParams, CancellationToken, Task<Hover?>> onHover = (request, _) =>
         {
             if (manager is { IsEngineWorkspace: true } && documentStore.TryGet(request.TextDocument.Uri, out var text))
-                return Task.FromResult(HoverHandler.Handle(text, request.Position, manager.Schema));
+                return Task.FromResult(HoverHandler.Handle(text, request.Position, manager.Schema, manager.PrototypeIds, request.TextDocument.Uri.GetFileSystemPath()));
 
             return Task.FromResult<Hover?>(null);
         };
@@ -165,9 +200,57 @@ public static class LanguageServerHost
         Func<DefinitionParams, CancellationToken, Task<LocationOrLocationLinks?>> onDefinition = (request, _) =>
         {
             if (manager is { IsEngineWorkspace: true } && documentStore.TryGet(request.TextDocument.Uri, out var text))
-                return Task.FromResult(DefinitionHandler.Handle(text, request.Position, manager.Schema));
+                return Task.FromResult(DefinitionHandler.Handle(text, request.Position, manager.Schema, manager.PrototypeIds, request.TextDocument.Uri));
 
             return Task.FromResult<LocationOrLocationLinks?>(null);
+        };
+
+        Func<ReferenceParams, CancellationToken, Task<LocationContainer?>> onReferences = (request, _) =>
+        {
+            if (manager is { IsEngineWorkspace: true } && documentStore.TryGet(request.TextDocument.Uri, out var text))
+            {
+                var locations = PrototypeIdHandler.References(
+                    text, request.Position, manager.Schema, PrototypeDocuments(), request.Context?.IncludeDeclaration ?? true);
+                return Task.FromResult<LocationContainer?>(new LocationContainer(locations));
+            }
+
+            return Task.FromResult<LocationContainer?>(null);
+        };
+
+        Func<PrepareRenameParams, CancellationToken, Task<RangeOrPlaceholderRange?>> onPrepareRename = (request, _) =>
+        {
+            if (manager is { IsEngineWorkspace: true } && documentStore.TryGet(request.TextDocument.Uri, out var text) &&
+                PrototypeIdHandler.PrepareRename(text, request.Position, manager.Schema) is { } range)
+            {
+                return Task.FromResult<RangeOrPlaceholderRange?>(new RangeOrPlaceholderRange(range));
+            }
+
+            return Task.FromResult<RangeOrPlaceholderRange?>(null);
+        };
+
+        Func<RenameParams, CancellationToken, Task<WorkspaceEdit?>> onRename = (request, _) =>
+        {
+            if (manager is { IsEngineWorkspace: true } && documentStore.TryGet(request.TextDocument.Uri, out var text))
+            {
+                if (!PrototypeIdHandler.IsValidId(request.NewName))
+                {
+                    languageServer?.Window.ShowWarning($"'{request.NewName}' can't be a prototype id: use letters, digits, '_', '-', '.' or '/'.");
+                    return Task.FromResult<WorkspaceEdit?>(null);
+                }
+
+                return Task.FromResult(PrototypeIdHandler.Rename(text, request.Position, request.NewName, manager.Schema, PrototypeDocuments()));
+            }
+
+            return Task.FromResult<WorkspaceEdit?>(null);
+        };
+
+        Func<WorkspaceSymbolParams, CancellationToken, Task<Container<WorkspaceSymbol>?>> onWorkspaceSymbols = (request, _) =>
+        {
+            if (manager is not { IsEngineWorkspace: true })
+                return Task.FromResult<Container<WorkspaceSymbol>?>(null);
+
+            return Task.FromResult<Container<WorkspaceSymbol>?>(
+                new Container<WorkspaceSymbol>(PrototypeIdHandler.Symbols(request.Query, PrototypeDocuments())));
         };
 
         var server = await OmniSharp.Extensions.LanguageServer.Server.LanguageServer.From(options => options
@@ -185,6 +268,7 @@ public static class LanguageServerHost
                 manager = new EngineWorkspaceManager(loggerFactory);
                 manager.SchemaChanged += RevalidateAllOpenDocuments;
                 manager.SchemaChanged += PublishReadyStatus;
+                manager.IndexesChanged += RevalidateAllOpenDocuments;
                 manager.SchemaRebuildStarted += PublishIndexing;
 
                 PublishIndexing();
@@ -237,6 +321,10 @@ public static class LanguageServerHost
             })
             .OnHover(onHover, (_, _) => new HoverRegistrationOptions { DocumentSelector = PrototypeSelector })
             .OnDefinition(onDefinition, (_, _) => new DefinitionRegistrationOptions { DocumentSelector = PrototypeSelector })
+            .OnReferences(onReferences, (_, _) => new ReferenceRegistrationOptions { DocumentSelector = PrototypeSelector })
+            .OnPrepareRename(onPrepareRename, (_, _) => new RenameRegistrationOptions { DocumentSelector = PrototypeSelector, PrepareProvider = true })
+            .OnRename(onRename, (_, _) => new RenameRegistrationOptions { DocumentSelector = PrototypeSelector, PrepareProvider = true })
+            .OnWorkspaceSymbols(onWorkspaceSymbols, (_, _) => new WorkspaceSymbolRegistrationOptions())
         );
 
         await server.WaitForExit;

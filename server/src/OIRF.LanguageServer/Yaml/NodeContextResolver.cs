@@ -27,7 +27,7 @@ public static class NodeContextResolver
             return new NodeContext.ParentValue(
                 typeKey,
                 item.IdValue,
-                item.Parents.Select(p => p.Id).ToHashSet(StringComparer.Ordinal));
+                item.Parents.Select(p => p.Id).ToHashSet(StringComparer.OrdinalIgnoreCase));
         }
 
         if (item.StyleRulesRange is { } rulesRange && isStyleType?.Invoke(typeKey) == true && IsInRulesRegion(item, rulesRange, position))

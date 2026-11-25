@@ -12,9 +12,21 @@ namespace OIRF.LanguageServer.Features;
 /// </summary>
 public static class HoverHandler
 {
-    public static Hover? Handle(string text, LspPosition position, EngineSchema schema)
+    public static Hover? Handle(string text, LspPosition position, EngineSchema schema, PrototypeIdIndex? prototypeIds = null, string? documentPath = null)
     {
         var document = PrototypeYamlParser.Parse(text);
+
+        if (prototypeIds is not null &&
+            PrototypeReferences.ReferenceAt(document, schema, position) is { } reference &&
+            new PrototypeLookup(document, prototypeIds, documentPath).Find(reference.TypeKey, reference.Id) is { } entry)
+        {
+            return new Hover
+            {
+                Contents = new MarkedStringsOrMarkupContent(new MarkupContent { Kind = MarkupKind.Markdown, Value = RenderPrototype(reference, entry) }),
+                Range = reference.Range,
+            };
+        }
+
         var context = NodeContextResolver.Resolve(document, position, schema.IsStylePrototype);
 
         var markdown = context switch
@@ -111,6 +123,34 @@ public static class HoverHandler
 
         var names = string.Join(", ", matches.Select(c => $"`{c.Name}`"));
         return Compose(string.Join("\n", matches.Select(c => c.Signature)), $"*alias of {names} (and their subclasses)*", docMarkdown: null);
+    }
+
+    // The referenced prototype's header, what it inherits and sets, and where it's written.
+    private static string RenderPrototype(PrototypeReference reference, PrototypeLookup.Entry entry)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.Append("```yaml\n").Append("type: ").Append(reference.TypeKey).Append("\nid: ").Append(reference.Id);
+        if (entry.Parents.Count > 0)
+            sb.Append("\nparent: [").Append(string.Join(", ", entry.Parents)).Append(']');
+        sb.Append("\n```");
+
+        var fields = entry.SetFieldNames.Where(n => !string.Equals(n, "parent", StringComparison.OrdinalIgnoreCase)).ToList();
+        if (fields.Count > 0)
+            sb.Append("\n\nSets: ").Append(string.Join(", ", fields.Select(f => $"`{f}`")));
+
+        var line = entry.Range.Start.Line + 1;
+        if (entry.FilePath is null)
+        {
+            sb.Append("\n\nDefined in this file, line ").Append(line).Append('.');
+        }
+        else
+        {
+            var uri = OmniSharp.Extensions.LanguageServer.Protocol.DocumentUri.FromFileSystemPath(entry.FilePath);
+            sb.Append("\n\nDefined in [").Append(Path.GetFileName(entry.FilePath)).Append(':').Append(line)
+              .Append("](").Append(uri).Append("#L").Append(line).Append(").");
+        }
+
+        return sb.ToString();
     }
 
     private static string Compose(string signature, string? badge, string? docMarkdown)

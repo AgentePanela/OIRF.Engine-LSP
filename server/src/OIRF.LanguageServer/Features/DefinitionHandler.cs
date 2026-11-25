@@ -6,15 +6,36 @@ using OmniSharp.Extensions.LanguageServer.Protocol.Models;
 namespace OIRF.LanguageServer.Features;
 
 /// <summary>
-/// Go-to-definition for prototype types, component types, and prototype/component fields -
-/// jumps straight to the C# declaration (class or member) the schema was built from, using the
-/// <see cref="SymbolLocation"/> captured once at schema-build time (see SchemaBuilder).
+/// Go-to-definition. A prototype id (a <c>parent:</c> entry or a field naming one) jumps to the
+/// <c>id:</c> that defines it, in this file or any other. Prototype types, component types, and
+/// prototype/component fields jump straight to the C# declaration the schema was built from,
+/// using the <see cref="SymbolLocation"/> captured once at schema-build time (see SchemaBuilder).
 /// </summary>
 public static class DefinitionHandler
 {
-    public static LocationOrLocationLinks? Handle(string text, LspPosition position, EngineSchema schema)
+    public static LocationOrLocationLinks? Handle(
+        string text,
+        LspPosition position,
+        EngineSchema schema,
+        PrototypeIdIndex? prototypeIds = null,
+        DocumentUri? documentUri = null)
     {
         var document = PrototypeYamlParser.Parse(text);
+
+        if (prototypeIds is not null && documentUri is not null &&
+            PrototypeReferences.ReferenceAt(document, schema, position) is { } reference)
+        {
+            var lookup = new PrototypeLookup(document, prototypeIds, documentUri.GetFileSystemPath());
+            if (lookup.Find(reference.TypeKey, reference.Id) is not { } entry)
+                return null;
+
+            return new LocationOrLocationLinks(new Location
+            {
+                Uri = entry.FilePath is null ? documentUri : DocumentUri.FromFileSystemPath(entry.FilePath),
+                Range = entry.Range,
+            });
+        }
+
         var context = NodeContextResolver.Resolve(document, position, schema.IsStylePrototype);
 
         var location = context switch

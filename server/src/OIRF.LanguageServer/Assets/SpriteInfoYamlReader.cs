@@ -3,12 +3,19 @@ using YamlDotNet.RepresentationModel;
 
 namespace OIRF.LanguageServer.Assets;
 
-/// <summary>One `animations:` entry from an info.yml sidecar.</summary>
+/// <summary>
+/// One `animations:` entry from an info.yml sidecar. For a spritesheet whose `frameCount` is
+/// omitted (or &lt;= 0), <see cref="FrameCount"/> is 0 and the engine counts every cell of the sheet
+/// once it reads the image; <see cref="FrameWidth"/>/<see cref="FrameHeight"/> let the indexer do
+/// the same from the PNG's dimensions.
+/// </summary>
 public sealed record AnimationEntry(
     string AnimKey,
     int FrameCount,
     bool IsSpritesheet,
-    IReadOnlyList<string> ConsumedRelativePngKeys);
+    IReadOnlyList<string> ConsumedRelativePngKeys,
+    int FrameWidth = 0,
+    int FrameHeight = 0);
 
 public sealed class SpriteInfoParseResult
 {
@@ -83,12 +90,13 @@ public static class SpriteInfoYamlReader
             if (filesNode is not YamlScalarNode { Value: { } fileName })
                 return null;
 
-            var frameCount = GetInt(map, "frameCount");
-            if (frameCount is null)
-                return null;
+            // Optional, like the engine: 0 = every cell of the sheet, counted from the PNG.
+            var frameCount = GetInt(map, "frameCount") ?? 0;
+            var frameWidth = GetInt(map, "frameWidth") ?? 0;
+            var frameHeight = GetInt(map, "frameHeight") ?? 0;
 
             var sourceKey = string.IsNullOrEmpty(folder) ? fileName : $"{folder}/{fileName}";
-            return new AnimationEntry(animKey, frameCount.Value, IsSpritesheet: true, [sourceKey]);
+            return new AnimationEntry(animKey, frameCount, IsSpritesheet: true, [sourceKey], frameWidth, frameHeight);
         }
 
         if (filesNode is not YamlSequenceNode fileSeq)

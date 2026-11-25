@@ -9,6 +9,11 @@ public sealed class ResourceIndex
     public required IReadOnlyList<string> AnimationKeys { get; init; }
     /// <summary>.fx file names (no extension, no folder) - see IndexShadersRoot.</summary>
     public required IReadOnlyList<string> ShaderKeys { get; init; }
+    /// <summary>
+    /// Spritesheet animations whose frame count the LSP could not work out (no frameCount and an
+    /// unreadable sheet or missing frame size). Any "{key}-{n}" sprite is accepted for these.
+    /// </summary>
+    public IReadOnlyList<string> OpenEndedAnimationKeys { get; init; } = [];
     public IReadOnlyList<string> AudioKeys { get; init; } = [];
     public IReadOnlyList<string> FontKeys { get; init; } = [];
 
@@ -33,7 +38,8 @@ public sealed class ResourceIndex
 /// </summary>
 public static class ResourceIndexer
 {
-    private static readonly string[] ExcludedDirNames = ["bin", "obj", "node_modules", ".git"];
+    // "publish": dotnet publish output, a copy of every resource and prototype file.
+    private static readonly string[] ExcludedDirNames = ["bin", "obj", "node_modules", ".git", "publish"];
 
     public static ResourceIndex Build(IEnumerable<string> workspaceRoots, ILogger logger)
     {
@@ -51,8 +57,10 @@ public static class ResourceIndexer
         var audioKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var fontKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        var openEndedKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var texturesRoot in textureRoots)
-            IndexTexturesRoot(texturesRoot, spriteKeys, animationKeys, logger);
+            IndexTexturesRoot(texturesRoot, spriteKeys, animationKeys, openEndedKeys, logger);
 
         foreach (var shadersRoot in shaderRoots)
             IndexShadersRoot(shadersRoot, shaderKeys);
@@ -67,6 +75,7 @@ public static class ResourceIndexer
         {
             SpriteKeys = spriteKeys.ToList(),
             AnimationKeys = animationKeys.ToList(),
+            OpenEndedAnimationKeys = openEndedKeys.ToList(),
             ShaderKeys = shaderKeys.ToList(),
             AudioKeys = audioKeys.ToList(),
             FontKeys = fontKeys.ToList(),
@@ -154,7 +163,7 @@ public static class ResourceIndexer
         }
     }
 
-    private static void IndexTexturesRoot(string texturesRoot, HashSet<string> spriteKeys, HashSet<string> animationKeys, ILogger logger)
+    private static void IndexTexturesRoot(string texturesRoot, HashSet<string> spriteKeys, HashSet<string> animationKeys, HashSet<string> openEndedKeys, ILogger logger)
     {
         var consumedRelativeKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -171,6 +180,9 @@ public static class ResourceIndexer
         foreach (var infoFile in infoFiles)
         {
             var folderRelative = ToRelativeForwardSlash(texturesRoot, Path.GetDirectoryName(infoFile)!);
+            // GetRelativePath returns "." for the root itself; the engine uses an empty folder there.
+            if (folderRelative == ".")
+                folderRelative = string.Empty;
 
             SpriteInfoParseResult? parsed;
             try
@@ -196,7 +208,15 @@ public static class ResourceIndexer
                 foreach (var consumed in animation.ConsumedRelativePngKeys)
                     consumedRelativeKeys.Add(consumed);
 
-                for (var i = 0; i < animation.FrameCount; i++)
+                var frameCount = animation.FrameCount;
+                if (animation.IsSpritesheet && frameCount <= 0)
+                    frameCount = CountSheetCells(texturesRoot, animation);
+
+                // Can't tell how many frames the engine will cut: don't flag any "{key}-{n}" later.
+                if (animation.IsSpritesheet && frameCount <= 0)
+                    openEndedKeys.Add(animation.AnimKey);
+
+                for (var i = 0; i < frameCount; i++)
                     spriteKeys.Add($"{animation.AnimKey}-{i}");
             }
         }
@@ -219,6 +239,24 @@ public static class ResourceIndexer
             if (!consumedRelativeKeys.Contains(relative))
                 spriteKeys.Add(relative);
         }
+    }
+
+    /// <summary>
+    /// Mirrors AssetManager.SliceAndQueue: with no frameCount the engine uses every cell of the
+    /// sheet (columns * rows). Returns 0 if the PNG or the frame size is unusable.
+    /// </summary>
+    private static int CountSheetCells(string texturesRoot, AnimationEntry animation)
+    {
+        if (animation.FrameWidth <= 0 || animation.FrameHeight <= 0 || animation.ConsumedRelativePngKeys.Count == 0)
+            return 0;
+
+        var pngPath = Path.Combine(texturesRoot, animation.ConsumedRelativePngKeys[0] + ".png");
+        if (!PngDimensions.TryRead(pngPath, out var width, out var height))
+            return 0;
+
+        var columns = Math.Max(1, width / animation.FrameWidth);
+        var rows = Math.Max(1, height / animation.FrameHeight);
+        return columns * rows;
     }
 
     private static string ToRelativeForwardSlash(string root, string path) =>
